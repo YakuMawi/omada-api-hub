@@ -1,6 +1,6 @@
 # Omada API Hub
 
-Application web multi-utilisateurs pour gérer des contrôleurs Omada SDN via l'OpenAPI.  
+Application web multi-utilisateurs pour gérer des contrôleurs Omada SDN via l'OpenAPI.
 Chaque utilisateur dispose de son propre espace isolé avec ses contrôleurs, ses sites et ses clients.
 
 ---
@@ -51,13 +51,15 @@ sudo journalctl -u omada-api-hub -f     # Logs en temps réel
 
 ## Mise à jour
 
+Depuis l'interface : **⚙ Paramètres → Vérifier les mises à jour → Mettre à jour**.
+
+Ou en ligne de commande :
+
 ```bash
 cd omada-api-hub
 git pull origin main
 sudo systemctl restart omada-api-hub
 ```
-
-Ou depuis l'interface : **⚙ Paramètres → Vérifier les mises à jour**.
 
 ---
 
@@ -67,13 +69,13 @@ La réinitialisation de mot de passe fonctionne en deux modes selon la configura
 
 ### Sans serveur SMTP configuré
 
-La vérification se fait par **email de récupération** : l'utilisateur doit saisir son nom de compte et l'adresse email renseignée lors de la création du compte. Si la combinaison correspond, il peut immédiatement définir un nouveau mot de passe.
+La vérification se fait par **email de récupération** : l'utilisateur saisit son nom de compte et l'adresse email renseignée à l'inscription. Si la combinaison correspond, il peut immédiatement définir un nouveau mot de passe.
 
 → Accessible depuis la page de connexion : **Mot de passe oublié ?**
 
 ### Avec serveur SMTP configuré
 
-Un **code à 6 chiffres** valable 15 minutes est envoyé à l'adresse email du compte. L'utilisateur doit le saisir avant de pouvoir définir un nouveau mot de passe.
+Un **code à 6 chiffres** valable 15 minutes est envoyé par email. L'utilisateur doit le saisir avant de pouvoir définir un nouveau mot de passe.
 
 → Configurer le SMTP : **⚙ Paramètres → Configuration email (SMTP)**
 
@@ -90,7 +92,7 @@ Dans **Paramètres → Configuration email (SMTP)**, renseignez :
 | Expéditeur | Adresse d'envoi (facultatif) |
 | STARTTLS | Activé par défaut (recommandé) |
 
-Utilisez le bouton **"Email de test"** pour valider la configuration — l'email est envoyé à l'adresse de récupération de votre compte.
+Utilisez le bouton **"Email de test"** pour valider la configuration.
 
 ### Email de récupération
 
@@ -98,9 +100,9 @@ Renseignez votre email lors de l'inscription ou dans **⚙ Paramètres → Compt
 
 ---
 
-## Récupération d'accès (mot de passe oublié sans email)
+## Récupération d'accès (sans email configuré)
 
-Si vous n'avez pas d'email de récupération configuré, utilisez l'utilitaire CLI directement sur le serveur :
+Si vous n'avez pas d'email de récupération, utilisez l'utilitaire CLI directement sur le serveur :
 
 ```bash
 python3 set_password.py
@@ -115,10 +117,13 @@ python3 set_password.py
 - **Dashboard sites** — liste des sites avec statut et métriques
 - **Détail de site** — onglets Appareils, Clients, WAN, WireGuard, Wi-Fi
 - **WAN** — détection automatique des ports WAN (En ligne / En backup / Hors ligne)
-- **Reset de mot de passe** — par email de récupération ou code SMTP
+- **Mode sombre** — bascule lune/soleil dans la navbar, ou choix dans Paramètres (Clair / Sombre / Suivre le système)
+- **Navbar épurée** — deux actions de déconnexion distinctes : changer de contrôleur Omada ou quitter l'API Hub
+- **Reset de mot de passe** — par email de récupération ou code SMTP à 6 chiffres
+- **Mise à jour depuis l'interface** — Paramètres → Version & Mises à jour
 - **Authentification sécurisée** — bcrypt, protection brute-force, CSRF, sessions
 - **PWA** — installable sur mobile depuis le navigateur (iOS/Android)
-- **Paramètres** — SMTP, version, changement de mot de passe et email
+- **Paramètres** — Apparence, SMTP, version, changement de mot de passe et email
 
 ---
 
@@ -151,4 +156,4 @@ omada-api-hub/
 
 ## Licence
 
-MIT © 2025 YakuMawi
+MIT © 2025–2026 YakuMawi
