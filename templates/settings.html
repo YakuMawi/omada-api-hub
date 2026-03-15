@@ -6,6 +6,36 @@
     <h4 class="mb-0"><i class="bi bi-gear"></i> Paramètres</h4>
 </div>
 
+<!-- Apparence -->
+<div class="card mb-4">
+    <div class="card-header fw-semibold">
+        <i class="bi bi-palette"></i> Apparence
+    </div>
+    <div class="card-body">
+        <p class="text-muted small mb-3">Choisissez le thème de l'interface. Le mode système suit automatiquement les préférences de votre appareil.</p>
+        <div class="d-flex gap-2 flex-wrap" role="group">
+            <label class="appearance-option">
+                <input type="radio" name="theme-pref" value="light" class="visually-hidden" onchange="setTheme('light')">
+                <span class="btn btn-outline-secondary btn-sm appearance-btn" id="ap-light">
+                    <i class="bi bi-sun me-1"></i> Clair
+                </span>
+            </label>
+            <label class="appearance-option">
+                <input type="radio" name="theme-pref" value="dark" class="visually-hidden" onchange="setTheme('dark')">
+                <span class="btn btn-outline-secondary btn-sm appearance-btn" id="ap-dark">
+                    <i class="bi bi-moon-stars me-1"></i> Sombre
+                </span>
+            </label>
+            <label class="appearance-option">
+                <input type="radio" name="theme-pref" value="system" class="visually-hidden" onchange="setTheme('system')">
+                <span class="btn btn-outline-secondary btn-sm appearance-btn" id="ap-system">
+                    <i class="bi bi-laptop me-1"></i> Système
+                </span>
+            </label>
+        </div>
+    </div>
+</div>
+
 <!-- Version & Mises à jour -->
 <div class="card mb-4">
     <div class="card-header fw-semibold">
@@ -156,7 +186,22 @@
     </div>
 </div>
 
+<style>
+.appearance-option input:checked + .appearance-btn {
+    background: var(--bs-primary);
+    border-color: var(--bs-primary);
+    color: #fff;
+}
+.appearance-option { cursor: pointer; }
+</style>
 <script>
+// Sync appearance buttons with current theme preference
+(function () {
+    var pref = localStorage.getItem('theme') || 'system';
+    var radio = document.querySelector('input[name="theme-pref"][value="' + pref + '"]');
+    if (radio) radio.checked = true;
+})();
+
 async function checkUpdate() {
     const btn = document.getElementById('btn-check-update');
     const res = document.getElementById('update-result');

@@ -2,8 +2,6 @@
 {% block title %}Clients - Omada API Hub{% endblock %}
 {% block content %}
 <style>
-    .sortable-th { cursor: pointer; user-select: none; }
-    .sortable-th:hover { background-color: rgba(0,0,0,.05); }
     #cust-toolbar .input-group { flex-shrink: 0; }
 </style>
 
@@ -25,26 +23,6 @@
     </div>
 </div>
 
-{% if not has_authcode_creds %}
-<div class="alert alert-info py-2 d-flex align-items-center">
-    <i class="bi bi-info-circle me-2"></i>
-    <span>
-        <strong>Creation/Suppression de clients :</strong>
-        Pour activer ces fonctions, reconnectez-vous en renseignant le <em>nom d'utilisateur</em> et <em>mot de passe</em> Omada sur la page de connexion.
-    </span>
-</div>
-{% else %}
-<div class="alert alert-light py-2 d-flex align-items-center justify-content-between border" id="authcode-test-banner">
-    <span>
-        <i class="bi bi-shield-lock text-success me-1"></i>
-        Mode Authorization Code configure
-    </span>
-    <button class="btn btn-outline-primary btn-sm" onclick="testAuthCode()">
-        <i class="bi bi-bug"></i> Tester le flow
-    </button>
-</div>
-<div id="authcode-test-result" class="d-none mb-3"></div>
-{% endif %}
 
 <!-- Barre d'outils : recherche, tri, vue -->
 <div class="d-flex flex-wrap gap-2 align-items-center mb-3" id="cust-toolbar" style="display:none!important">

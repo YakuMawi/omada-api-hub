@@ -1192,7 +1192,14 @@ def api_back_to_msp():
 
 @app.route("/api/logout")
 def api_logout():
-    session.clear()
+    # Clear only Omada-related session data, keep app authentication
+    _OMADA_KEYS = [
+        "access_token", "omada_url", "client_id", "client_secret",
+        "token_expires_at", "mode", "customer_name", "customer_id",
+        "site_id", "ac_token_expires_at", "msp_backup",
+    ]
+    for k in _OMADA_KEYS:
+        session.pop(k, None)
     return redirect(url_for("login_page"))
 
 
