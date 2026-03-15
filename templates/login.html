@@ -1,0 +1,207 @@
+{% extends "base.html" %}
+{% block title %}Connexion - Omada API Hub{% endblock %}
+{% block content %}
+<div class="row justify-content-center mt-5">
+    <div class="col-md-7 col-lg-6">
+        <div class="card shadow">
+            <div class="card-body p-4">
+                <div class="text-center mb-4">
+                    <img src="/static/img/logo.svg" alt="Omada API Hub" height="60" class="mb-2">
+                    <p class="text-muted">Connexion au controleur MSP</p>
+                </div>
+
+                <!-- Saved profiles dropdown -->
+                <div id="profiles-wrapper" class="d-none mb-3">
+                    <label class="form-label fw-bold"><i class="bi bi-bookmark-star"></i> Controleurs sauvegardes</label>
+                    <div class="input-group">
+                        <select class="form-select" id="profiles-select">
+                            <option value="-1" selected>-- Choisir un controleur --</option>
+                        </select>
+                        <button class="btn btn-outline-danger" type="button" id="delete-profile-btn" title="Supprimer" disabled>
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <form id="login-form">
+                    <div class="mb-3">
+                        <label for="label" class="form-label">Nom du controleur</label>
+                        <input type="text" class="form-control" id="label" name="label"
+                               placeholder="Ex: Controleur Paris, MSP Prod..." required>
+                        <div class="form-text">Un nom pour identifier ce controleur</div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="base_url" class="form-label">URL du controleur</label>
+                        <input type="url" class="form-control" id="base_url" name="base_url"
+                               placeholder="https://10.50.10.104:8043" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="omadac_id" class="form-label">Omada ID (MSP ID)</label>
+                        <input type="text" class="form-control" id="omadac_id" name="omadac_id"
+                               placeholder="Identifiant du controleur MSP" required>
+                    </div>
+
+                    <!-- Section 1: Client Credentials App -->
+                    <div class="card bg-light mb-3">
+                        <div class="card-body py-2 px-3">
+                            <p class="fw-bold mb-1">
+                                <i class="bi bi-key text-primary"></i> App Client Credentials
+                                <span class="badge bg-primary ms-1">Obligatoire</span>
+                            </p>
+                            <p class="text-muted small mb-2">Application OpenAPI en mode "Client Credentials" — pour les operations courantes</p>
+                            <div class="mb-2">
+                                <label for="client_id" class="form-label small mb-0">Client ID</label>
+                                <input type="text" class="form-control form-control-sm" id="client_id" name="client_id"
+                                       placeholder="ID de l'app Client Credentials" required>
+                            </div>
+                            <div class="mb-1">
+                                <label for="client_secret" class="form-label small mb-0">Client Secret</label>
+                                <input type="password" class="form-control form-control-sm" id="client_secret" name="client_secret"
+                                       placeholder="Secret de l'app Client Credentials" required>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Section 2: Authorization Code App -->
+                    <div class="card bg-light mb-3">
+                        <div class="card-body py-2 px-3">
+                            <p class="fw-bold mb-1">
+                                <i class="bi bi-shield-lock text-success"></i> App Authorization Code
+                                <span class="badge bg-secondary ms-1">Optionnel</span>
+                            </p>
+                            <p class="text-muted small mb-2">Application OpenAPI en mode "Authorization Code" + identifiants admin — pour creer/supprimer des clients</p>
+                            <div class="mb-2">
+                                <label for="ac_client_id" class="form-label small mb-0">Client ID (Auth Code App)</label>
+                                <input type="text" class="form-control form-control-sm" id="ac_client_id" name="ac_client_id"
+                                       placeholder="ID de l'app Authorization Code">
+                            </div>
+                            <div class="mb-2">
+                                <label for="ac_client_secret" class="form-label small mb-0">Client Secret (Auth Code App)</label>
+                                <input type="password" class="form-control form-control-sm" id="ac_client_secret" name="ac_client_secret"
+                                       placeholder="Secret de l'app Authorization Code">
+                            </div>
+                            <div class="mb-2">
+                                <label for="username" class="form-label small mb-0">Nom d'utilisateur admin Omada</label>
+                                <input type="text" class="form-control form-control-sm" id="username" name="username"
+                                       placeholder="Compte admin du controleur">
+                            </div>
+                            <div class="mb-1">
+                                <label for="password" class="form-label small mb-0">Mot de passe admin Omada</label>
+                                <input type="password" class="form-control form-control-sm" id="password" name="password"
+                                       placeholder="Mot de passe admin du controleur">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" id="save_credentials" checked>
+                        <label class="form-check-label" for="save_credentials">
+                            Sauvegarder les identifiants
+                        </label>
+                    </div>
+
+                    <div id="login-error" class="alert alert-danger d-none"></div>
+
+                    <button type="submit" class="btn btn-primary w-100" id="login-btn">
+                        <span class="spinner-border spinner-border-sm d-none" id="login-spinner"></span>
+                        <i class="bi bi-box-arrow-in-right"></i> Se connecter
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let savedProfiles = [];
+const ALL_FIELDS = ['label','base_url','omadac_id','client_id','client_secret','ac_client_id','ac_client_secret','username','password'];
+
+(async function() {
+    try {
+        const resp = await fetch('/api/credentials');
+        if (resp.ok) {
+            const data = await resp.json();
+            savedProfiles = Array.isArray(data) ? data : [];
+            renderProfilesDropdown();
+        }
+    } catch (e) {}
+})();
+
+function renderProfilesDropdown() {
+    const wrapper = document.getElementById('profiles-wrapper');
+    const select = document.getElementById('profiles-select');
+    if (savedProfiles.length === 0) { wrapper.classList.add('d-none'); return; }
+    wrapper.classList.remove('d-none');
+    select.innerHTML = '<option value="-1">-- Choisir un controleur --</option>';
+    savedProfiles.forEach((p, idx) => {
+        const opt = document.createElement('option');
+        opt.value = idx;
+        opt.textContent = p.label || `Controleur ${idx + 1}`;
+        select.appendChild(opt);
+    });
+    if (savedProfiles.length === 1) { select.value = '0'; fillFromProfile(0); }
+}
+
+function fillFromProfile(idx) {
+    if (idx < 0 || idx >= savedProfiles.length) return;
+    const p = savedProfiles[idx];
+    ALL_FIELDS.forEach(f => {
+        const el = document.getElementById(f);
+        if (el) el.value = p[f] || '';
+    });
+    document.getElementById('delete-profile-btn').disabled = false;
+}
+
+document.getElementById('profiles-select').addEventListener('change', function() {
+    const idx = parseInt(this.value, 10);
+    if (idx >= 0) { fillFromProfile(idx); }
+    else {
+        ALL_FIELDS.forEach(f => { const el = document.getElementById(f); if (el) el.value = ''; });
+        document.getElementById('delete-profile-btn').disabled = true;
+    }
+});
+
+document.getElementById('delete-profile-btn').addEventListener('click', async function() {
+    const idx = parseInt(document.getElementById('profiles-select').value, 10);
+    if (idx < 0 || !confirm('Supprimer ce controleur sauvegarde ?')) return;
+    await fetch(`/api/credentials/${idx}`, { method: 'DELETE' });
+    savedProfiles.splice(idx, 1);
+    renderProfilesDropdown();
+    ALL_FIELDS.forEach(f => { const el = document.getElementById(f); if (el) el.value = ''; });
+    document.getElementById('delete-profile-btn').disabled = true;
+});
+
+document.getElementById('login-form').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    const btn = document.getElementById('login-btn');
+    const spinner = document.getElementById('login-spinner');
+    const errorDiv = document.getElementById('login-error');
+    btn.disabled = true; spinner.classList.remove('d-none'); errorDiv.classList.add('d-none');
+
+    const data = { mode: 'msp' };
+    ALL_FIELDS.forEach(f => {
+        const el = document.getElementById(f);
+        if (el) data[f] = el.value;
+    });
+
+    try {
+        const resp = await fetch('/api/login', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data) });
+        const result = await resp.json();
+        if (resp.ok && result.success) {
+            if (document.getElementById('save_credentials').checked) {
+                await fetch('/api/credentials', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data) });
+            }
+            window.location.href = '/customers';
+        } else {
+            errorDiv.textContent = result.error || 'Erreur de connexion';
+            errorDiv.classList.remove('d-none');
+        }
+    } catch (err) {
+        errorDiv.textContent = 'Erreur reseau : ' + err.message;
+        errorDiv.classList.remove('d-none');
+    } finally { btn.disabled = false; spinner.classList.add('d-none'); }
+});
+</script>
+{% endblock %}

@@ -1,0 +1,680 @@
+{% extends "base.html" %}
+{% block title %}Sites - Omada API Hub{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-building"></i> Sites</h2>
+    <div class="d-flex gap-2">
+        <button class="btn btn-outline-secondary" id="bulk-delete-btn" onclick="showBulkDeleteModal()" disabled>
+            <i class="bi bi-trash"></i> Supprimer (<span id="bulk-delete-count">0</span>)
+        </button>
+        {% if is_customer_mode %}
+        <button class="btn btn-outline-success" onclick="showBulkCreateModal()">
+            <i class="bi bi-layers"></i> Creation en masse
+        </button>
+        {% endif %}
+        <a href="{{ url_for('create_site_page') }}" class="btn btn-success">
+            <i class="bi bi-plus-lg"></i> Creer un site
+        </a>
+    </div>
+</div>
+
+<div id="sites-loading" class="text-center py-5">
+    <div class="spinner-border text-primary" role="status"></div>
+    <p class="mt-2 text-muted">Chargement des sites...</p>
+</div>
+
+<div id="sites-error" class="alert alert-danger d-none"></div>
+
+<div id="sites-empty" class="text-center py-5 d-none">
+    <i class="bi bi-inbox text-muted" style="font-size:3rem"></i>
+    <p class="mt-2 text-muted">Aucun site trouve</p>
+</div>
+
+<div class="table-responsive d-none" id="sites-table-wrapper">
+    <table class="table table-hover align-middle">
+        <thead class="table-light">
+            <tr>
+                <th style="width:40px"><input type="checkbox" class="form-check-input" id="select-all-sites" onchange="toggleSelectAll(this)"></th>
+                <th>Nom</th>
+                {% if not is_customer_mode %}<th>Client</th>{% endif %}
+                <th>Region</th>
+                <th>Type</th>
+                <th>Equipements</th>
+                <th class="text-end">Actions</th>
+            </tr>
+        </thead>
+        <tbody id="sites-tbody"></tbody>
+    </table>
+</div>
+
+<!-- Delete modal -->
+<div class="modal fade" id="deleteModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title"><i class="bi bi-exclamation-triangle"></i> Supprimer le site</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>Vous etes sur le point de supprimer le site <strong id="delete-site-name"></strong>.</p>
+                <div class="alert alert-warning">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    Les equipements du site seront automatiquement oublies (forget) avant la suppression.
+                </div>
+                <div id="delete-progress-wrapper" class="d-none">
+                    <p class="mb-1" id="delete-progress-text">Traitement en cours...</p>
+                    <div class="progress">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated"
+                             id="delete-progress-bar" style="width: 0%"></div>
+                    </div>
+                </div>
+                <div id="delete-result" class="d-none mt-3"></div>
+            </div>
+            <div class="modal-footer" id="delete-modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+                <button type="button" class="btn btn-danger" id="confirm-delete-btn">
+                    <i class="bi bi-trash"></i> Supprimer
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal : suppression en masse -->
+<div class="modal fade" id="bulkDeleteModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title"><i class="bi bi-exclamation-triangle"></i> Suppression en masse</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="bulk-delete-confirm-section">
+                    <div class="alert alert-danger">
+                        <i class="bi bi-exclamation-triangle-fill"></i>
+                        Vous etes sur le point de supprimer <strong id="bulk-delete-modal-count">0</strong> site(s).
+                        Les equipements seront automatiquement oublies (forget) avant la suppression.
+                    </div>
+                    <p class="fw-bold mb-2">Sites selectionnes :</p>
+                    <ul id="bulk-delete-site-list" class="list-group mb-3" style="max-height:200px;overflow-y:auto"></ul>
+                    <div class="mb-3">
+                        <label class="form-label">Tapez <strong>SUPPRIMER</strong> pour confirmer</label>
+                        <input type="text" class="form-control" id="bulk-delete-confirm-input" placeholder="SUPPRIMER">
+                    </div>
+                </div>
+                <div id="bulk-delete-progress-section" class="d-none">
+                    <p class="fw-bold mb-2" id="bulk-delete-progress-text">Suppression en cours...</p>
+                    <div class="progress mb-3">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated bg-danger"
+                             id="bulk-delete-progress-bar" style="width: 0%"></div>
+                    </div>
+                    <div id="bulk-delete-log" class="small bg-light p-2 rounded" style="max-height:250px;overflow-y:auto"></div>
+                </div>
+            </div>
+            <div class="modal-footer" id="bulk-delete-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+                <button type="button" class="btn btn-danger" id="bulk-delete-confirm-btn" onclick="executeBulkDelete()" disabled>
+                    <i class="bi bi-trash"></i> Supprimer tout
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal : creation en masse -->
+<div class="modal fade" id="bulkCreateModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title"><i class="bi bi-layers"></i> Creation de sites en masse</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="bulk-form-section">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Prefixe du nom</label>
+                        <input type="text" class="form-control" id="bulk-prefix" placeholder="Ex: LAB" value="LAB">
+                        <div class="form-text">Les sites seront nommes : Prefixe + numero</div>
+                    </div>
+                    <div class="row">
+                        <div class="col-6 mb-3">
+                            <label class="form-label fw-bold">Nombre de sites</label>
+                            <input type="number" class="form-control" id="bulk-count" min="1" max="100" value="3">
+                        </div>
+                        <div class="col-6 mb-3">
+                            <label class="form-label fw-bold">Commencer a partir de</label>
+                            <input type="number" class="form-control" id="bulk-start" min="0" value="1">
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label fw-bold">Region</label>
+                            <input type="text" class="form-control" id="bulk-region" value="France" placeholder="Ex: France">
+                            <div class="form-text">Valeur du site existant chargee automatiquement</div>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label fw-bold">Fuseau horaire</label>
+                            <input type="text" class="form-control" id="bulk-timezone" value="Europe/Paris" placeholder="Ex: Europe/Amsterdam">
+                            <div class="form-text">Valeur du site existant chargee automatiquement</div>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label fw-bold">Scenario</label>
+                            <select class="form-select" id="bulk-scenario">
+                                <option value="">Chargement...</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label fw-bold">Type</label>
+                            <select class="form-select" id="bulk-type">
+                                <option value="0">Basic</option>
+                                <option value="1">Pro</option>
+                            </select>
+                        </div>
+                    </div>
+                    <hr>
+                    <p class="fw-bold mb-2">Compte equipement (Device Account)</p>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Utilisateur</label>
+                            <input type="text" class="form-control" id="bulk-dev-user" value="admin" placeholder="admin">
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Mot de passe</label>
+                            <input type="text" class="form-control" id="bulk-dev-pass" placeholder="Min 10 chars complexe">
+                            <div class="form-text">10-64 chars: majuscules, minuscules, chiffres, symboles</div>
+                        </div>
+                    </div>
+                    <div class="alert alert-info py-2" id="bulk-preview">
+                        <strong>Apercu :</strong> <span id="bulk-preview-text"></span>
+                    </div>
+                    <div id="bulk-error" class="alert alert-danger d-none"></div>
+                </div>
+                <div id="bulk-progress-section" class="d-none">
+                    <p class="fw-bold mb-2" id="bulk-progress-text">Creation en cours...</p>
+                    <div class="progress mb-3">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated bg-success"
+                             id="bulk-progress-bar" style="width: 0%"></div>
+                    </div>
+                    <div id="bulk-log" class="small bg-light p-2 rounded" style="max-height:250px;overflow-y:auto"></div>
+                </div>
+            </div>
+            <div class="modal-footer" id="bulk-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+                <button type="button" class="btn btn-success" id="bulk-create-btn" onclick="executeBulkCreate()">
+                    <i class="bi bi-layers"></i> Creer les sites
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const PROFILE_MODE = '{{ profile_mode }}';
+let currentDeleteSiteId = null;
+let currentDeleteCustomerId = null;
+
+async function loadSites() {
+    const loading = document.getElementById('sites-loading');
+    const empty = document.getElementById('sites-empty');
+    const errorDiv = document.getElementById('sites-error');
+    const tableWrapper = document.getElementById('sites-table-wrapper');
+    const tbody = document.getElementById('sites-tbody');
+
+    loading.classList.remove('d-none');
+    empty.classList.add('d-none');
+    errorDiv.classList.add('d-none');
+    tableWrapper.classList.add('d-none');
+
+    try {
+        const resp = await fetch('/api/sites');
+        if (resp.status === 401) { window.location.href = '/'; return; }
+        const data = await resp.json();
+
+        loading.classList.add('d-none');
+
+        if (data.errorCode && data.errorCode !== 0) {
+            errorDiv.textContent = 'Erreur API : ' + (data.msg || JSON.stringify(data));
+            errorDiv.classList.remove('d-none');
+            return;
+        }
+
+        const sites = (data.result && data.result.data) || [];
+
+        if (sites.length === 0) {
+            empty.classList.remove('d-none');
+            return;
+        }
+
+        tbody.innerHTML = '';
+        sites.forEach(site => {
+            const siteId = site.siteId || site.id || '';
+            const siteName = site.siteName || site.name || '-';
+            const customerName = site.customerName || '-';
+            const customerId = site.customerId || '';
+            const typeLabel = site.type === 1
+                ? '<span class="badge bg-info">Pro</span>'
+                : '<span class="badge bg-secondary">Basic</span>';
+
+            // Device counts from MSP response (may not exist in Customer mode)
+            const apConn = site.connectedApNum || 0;
+            const apDisc = site.disconnectedApNum || 0;
+            const apIso = site.isolatedApNum || 0;
+            const swConn = site.connectedSwitchNum || 0;
+            const swDisc = site.disconnectedSwitchNum || 0;
+            const totalAp = apConn + apDisc + apIso;
+            const totalSw = swConn + swDisc;
+            const hasGateway = site.wan || site.sitePublicIp;
+            const totalDevices = totalAp + totalSw + (hasGateway ? 1 : 0);
+
+            let devicesBadges = '';
+            if (totalDevices === 0) {
+                devicesBadges = '<span class="text-muted">-</span>';
+            } else {
+                if (hasGateway) devicesBadges += '<span class="badge bg-danger me-1" title="Routeur"><i class="bi bi-hdd-network"></i> 1</span>';
+                if (totalSw > 0) devicesBadges += `<span class="badge bg-warning text-dark me-1" title="Switches"><i class="bi bi-ethernet"></i> ${totalSw}</span>`;
+                if (totalAp > 0) devicesBadges += `<span class="badge bg-success me-1" title="AP"><i class="bi bi-wifi"></i> ${totalAp}</span>`;
+            }
+
+            const tr = document.createElement('tr');
+            let cells = `<td><input type="checkbox" class="form-check-input site-checkbox" data-site-id="${siteId}" data-site-name="${escapeHtml(siteName)}" data-customer-id="${customerId}" onchange="updateBulkDeleteBtn()"></td>`;
+            cells += `<td><a href="/sites/${siteId}" class="text-decoration-none fw-bold">${escapeHtml(siteName)}</a></td>`;
+            if (PROFILE_MODE !== 'customer') {
+                cells += `<td><span class="badge bg-light text-dark">${escapeHtml(customerName)}</span></td>`;
+            }
+            cells += `
+                <td>${escapeHtml(site.region || '-')}</td>
+                <td>${typeLabel}</td>
+                <td>${devicesBadges}</td>
+                <td class="text-end">
+                    <a href="/sites/${siteId}" class="btn btn-sm btn-outline-primary me-1" title="Details">
+                        <i class="bi bi-eye"></i>
+                    </a>
+                    <button class="btn btn-sm btn-outline-danger" title="Supprimer"
+                            onclick="showDeleteModal('${siteId}', '${escapeHtml(siteName)}', '${customerId}')">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </td>
+            `;
+            tr.innerHTML = cells;
+            tbody.appendChild(tr);
+        });
+        tableWrapper.classList.remove('d-none');
+    } catch (err) {
+        loading.classList.add('d-none');
+        errorDiv.textContent = 'Erreur : ' + err.message;
+        errorDiv.classList.remove('d-none');
+    }
+}
+
+function showDeleteModal(siteId, siteName, customerId) {
+    currentDeleteSiteId = siteId;
+    currentDeleteCustomerId = customerId;
+    document.getElementById('delete-site-name').textContent = siteName;
+    document.getElementById('delete-progress-wrapper').classList.add('d-none');
+    document.getElementById('delete-result').classList.add('d-none');
+    document.getElementById('delete-progress-bar').className = 'progress-bar progress-bar-striped progress-bar-animated';
+    document.getElementById('delete-progress-bar').style.width = '0%';
+    document.getElementById('confirm-delete-btn').disabled = false;
+    document.getElementById('confirm-delete-btn').classList.remove('d-none');
+    document.querySelector('#delete-modal-footer .btn-secondary').classList.remove('d-none');
+
+    new bootstrap.Modal(document.getElementById('deleteModal')).show();
+}
+
+document.getElementById('confirm-delete-btn').addEventListener('click', async function() {
+    const btn = this;
+    btn.disabled = true;
+    const progressWrapper = document.getElementById('delete-progress-wrapper');
+    const progressBar = document.getElementById('delete-progress-bar');
+    const progressText = document.getElementById('delete-progress-text');
+    const resultDiv = document.getElementById('delete-result');
+    document.querySelector('#delete-modal-footer .btn-secondary').classList.add('d-none');
+
+    progressWrapper.classList.remove('d-none');
+
+    try {
+        let resp, data;
+        // Always use delete-with-forget workflow
+        progressText.textContent = 'Forget des equipements + suppression...';
+        progressBar.style.width = '30%';
+        resp = await fetch(`/api/sites/${currentDeleteSiteId}/delete-with-forget`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({customerId: currentDeleteCustomerId}),
+        });
+        data = await resp.json();
+        progressBar.style.width = '100%';
+        progressBar.classList.remove('progress-bar-animated');
+        const ok = data.delete_status === 200 && (!data.delete_result.errorCode || data.delete_result.errorCode === 0);
+        if (ok) {
+            progressBar.classList.add('bg-success');
+            resultDiv.innerHTML = '<div class="alert alert-success mb-0"><i class="bi bi-check-circle"></i> Site supprime !</div>';
+        } else {
+            progressBar.classList.add('bg-danger');
+            resultDiv.innerHTML = `<div class="alert alert-danger mb-0">${escapeHtml((data.delete_result && data.delete_result.msg) || 'Erreur')}</div>`;
+        }
+    } catch (err) {
+        progressBar.style.width = '100%';
+        progressBar.classList.add('bg-danger');
+        resultDiv.innerHTML = `<div class="alert alert-danger mb-0">${escapeHtml(err.message)}</div>`;
+    }
+
+    resultDiv.classList.remove('d-none');
+    btn.classList.add('d-none');
+    setTimeout(() => {
+        bootstrap.Modal.getInstance(document.getElementById('deleteModal')).hide();
+        loadSites();
+    }, 2000);
+});
+
+// ==================== Bulk select & delete ====================
+
+function toggleSelectAll(masterCheckbox) {
+    document.querySelectorAll('.site-checkbox').forEach(cb => {
+        cb.checked = masterCheckbox.checked;
+    });
+    updateBulkDeleteBtn();
+}
+
+function updateBulkDeleteBtn() {
+    const checked = document.querySelectorAll('.site-checkbox:checked');
+    const btn = document.getElementById('bulk-delete-btn');
+    const countSpan = document.getElementById('bulk-delete-count');
+    countSpan.textContent = checked.length;
+    if (checked.length > 0) {
+        btn.disabled = false;
+        btn.className = 'btn btn-danger';
+    } else {
+        btn.disabled = true;
+        btn.className = 'btn btn-outline-secondary';
+    }
+    // Sync select-all checkbox
+    const all = document.querySelectorAll('.site-checkbox');
+    const selectAll = document.getElementById('select-all-sites');
+    if (selectAll) selectAll.checked = all.length > 0 && checked.length === all.length;
+}
+
+function getSelectedSites() {
+    const selected = [];
+    document.querySelectorAll('.site-checkbox:checked').forEach(cb => {
+        selected.push({
+            siteId: cb.dataset.siteId,
+            siteName: cb.dataset.siteName,
+            customerId: cb.dataset.customerId,
+        });
+    });
+    return selected;
+}
+
+function showBulkDeleteModal() {
+    const sites = getSelectedSites();
+    if (sites.length === 0) return;
+
+    document.getElementById('bulk-delete-modal-count').textContent = sites.length;
+    const list = document.getElementById('bulk-delete-site-list');
+    list.innerHTML = '';
+    sites.forEach(s => {
+        const li = document.createElement('li');
+        li.className = 'list-group-item py-1';
+        li.textContent = s.siteName;
+        list.appendChild(li);
+    });
+
+    document.getElementById('bulk-delete-confirm-section').classList.remove('d-none');
+    document.getElementById('bulk-delete-progress-section').classList.add('d-none');
+    document.getElementById('bulk-delete-confirm-input').value = '';
+    document.getElementById('bulk-delete-confirm-btn').disabled = true;
+    document.getElementById('bulk-delete-footer').querySelector('.btn-secondary').classList.remove('d-none');
+    document.getElementById('bulk-delete-confirm-btn').classList.remove('d-none');
+
+    new bootstrap.Modal(document.getElementById('bulkDeleteModal')).show();
+}
+
+document.getElementById('bulk-delete-confirm-input').addEventListener('input', function() {
+    document.getElementById('bulk-delete-confirm-btn').disabled = this.value.trim() !== 'SUPPRIMER';
+});
+
+async function executeBulkDelete() {
+    const sites = getSelectedSites();
+    if (sites.length === 0) return;
+
+    document.getElementById('bulk-delete-confirm-section').classList.add('d-none');
+    document.getElementById('bulk-delete-progress-section').classList.remove('d-none');
+    document.getElementById('bulk-delete-confirm-btn').classList.add('d-none');
+    document.getElementById('bulk-delete-footer').querySelector('.btn-secondary').classList.add('d-none');
+
+    const bar = document.getElementById('bulk-delete-progress-bar');
+    const text = document.getElementById('bulk-delete-progress-text');
+    const log = document.getElementById('bulk-delete-log');
+    log.innerHTML = '';
+
+    let success = 0;
+    let failed = 0;
+
+    for (let i = 0; i < sites.length; i++) {
+        const site = sites[i];
+        const pct = Math.round(((i + 1) / sites.length) * 100);
+        text.textContent = `Suppression ${i + 1}/${sites.length} : ${site.siteName}...`;
+        bar.style.width = pct + '%';
+
+        try {
+            const resp = await fetch(`/api/sites/${site.siteId}/delete-with-forget`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({customerId: site.customerId}),
+            });
+            const data = await resp.json();
+            const ok = data.delete_status === 200 && (!data.delete_result.errorCode || data.delete_result.errorCode === 0);
+            if (ok) {
+                success++;
+                log.innerHTML += `<div class="text-success"><i class="bi bi-check-circle"></i> ${escapeHtml(site.siteName)} - supprime</div>`;
+            } else {
+                failed++;
+                const msg = (data.delete_result && data.delete_result.msg) || 'Erreur';
+                log.innerHTML += `<div class="text-danger"><i class="bi bi-x-circle"></i> ${escapeHtml(site.siteName)} - ${escapeHtml(msg)}</div>`;
+            }
+        } catch (err) {
+            failed++;
+            log.innerHTML += `<div class="text-danger"><i class="bi bi-x-circle"></i> ${escapeHtml(site.siteName)} - ${escapeHtml(err.message)}</div>`;
+        }
+        log.scrollTop = log.scrollHeight;
+    }
+
+    bar.classList.remove('progress-bar-animated');
+    bar.style.width = '100%';
+    text.textContent = `Termine : ${success} supprime(s), ${failed} erreur(s)`;
+
+    // Show close button
+    document.getElementById('bulk-delete-footer').querySelector('.btn-secondary').classList.remove('d-none');
+    document.getElementById('bulk-delete-footer').querySelector('.btn-secondary').textContent = 'Fermer';
+
+    setTimeout(() => {
+        bootstrap.Modal.getInstance(document.getElementById('bulkDeleteModal'))?.hide();
+        // Reset selection state
+        document.getElementById('select-all-sites').checked = false;
+        document.getElementById('bulk-delete-btn').disabled = true;
+        document.getElementById('bulk-delete-btn').className = 'btn btn-outline-secondary';
+        document.getElementById('bulk-delete-count').textContent = '0';
+        loadSites();
+    }, 3000);
+}
+
+// ==================== Bulk create ====================
+async function loadBulkScenarios() {
+    const select = document.getElementById('bulk-scenario');
+    try {
+        const resp = await fetch('/api/scenarios');
+        const data = await resp.json();
+        const scenarios = (data.result && data.result.data) || data.result || [];
+        select.innerHTML = '';
+        if (Array.isArray(scenarios)) {
+            scenarios.forEach(s => {
+                const name = typeof s === 'string' ? s : (s.name || s.scenario || '');
+                if (name) {
+                    const opt = document.createElement('option');
+                    opt.value = name;
+                    opt.textContent = name;
+                    select.appendChild(opt);
+                }
+            });
+        }
+        if (select.options.length === 0) {
+            select.innerHTML = '<option value="Office">Office</option><option value="Home">Home</option><option value="Hotel">Hotel</option>';
+        }
+    } catch(e) {
+        select.innerHTML = '<option value="Office">Office</option><option value="Home">Home</option><option value="Hotel">Hotel</option>';
+    }
+}
+loadBulkScenarios();
+
+// Load defaults (region, timezone, scenario) from existing site
+async function loadSiteDefaults() {
+    try {
+        const resp = await fetch('/api/site-defaults');
+        const data = await resp.json();
+        if (data.region) document.getElementById('bulk-region').value = data.region;
+        if (data.timeZone) document.getElementById('bulk-timezone').value = data.timeZone;
+        // Pre-select scenario if available
+        if (data.scenario) {
+            const scenarioSelect = document.getElementById('bulk-scenario');
+            for (const opt of scenarioSelect.options) {
+                if (opt.value === data.scenario) { opt.selected = true; break; }
+            }
+        }
+    } catch(e) { /* ignore */ }
+}
+loadSiteDefaults();
+
+function updateBulkPreview() {
+    const prefix = document.getElementById('bulk-prefix').value || 'Site';
+    const count = parseInt(document.getElementById('bulk-count').value) || 1;
+    const start = parseInt(document.getElementById('bulk-start').value) || 1;
+    const names = [];
+    const maxShow = Math.min(count, 5);
+    for (let i = 0; i < maxShow; i++) names.push(`${prefix} ${start + i}`);
+    if (count > 5) names.push('...');
+    document.getElementById('bulk-preview-text').textContent = names.join(', ');
+}
+
+function showBulkCreateModal() {
+    document.getElementById('bulk-form-section').classList.remove('d-none');
+    document.getElementById('bulk-progress-section').classList.add('d-none');
+    document.getElementById('bulk-error').classList.add('d-none');
+    document.getElementById('bulk-footer').innerHTML = `
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+        <button type="button" class="btn btn-success" id="bulk-create-btn" onclick="executeBulkCreate()">
+            <i class="bi bi-layers"></i> Creer les sites
+        </button>`;
+    document.getElementById('bulk-log').innerHTML = '';
+    updateBulkPreview();
+    new bootstrap.Modal(document.getElementById('bulkCreateModal')).show();
+}
+
+// Live preview
+['bulk-prefix', 'bulk-count', 'bulk-start'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('input', updateBulkPreview);
+});
+
+async function executeBulkCreate() {
+    const prefix = document.getElementById('bulk-prefix').value.trim();
+    const count = parseInt(document.getElementById('bulk-count').value) || 1;
+    const start = parseInt(document.getElementById('bulk-start').value) || 1;
+    const region = document.getElementById('bulk-region').value;
+    const timeZone = document.getElementById('bulk-timezone').value;
+    const scenario = document.getElementById('bulk-scenario').value;
+    const siteType = parseInt(document.getElementById('bulk-type').value);
+    const devUser = document.getElementById('bulk-dev-user').value.trim();
+    const devPass = document.getElementById('bulk-dev-pass').value;
+    const errorDiv = document.getElementById('bulk-error');
+
+    if (!prefix) {
+        errorDiv.textContent = 'Le prefixe est obligatoire';
+        errorDiv.classList.remove('d-none');
+        return;
+    }
+    if (!devUser || !devPass) {
+        errorDiv.textContent = 'Utilisateur et mot de passe device sont obligatoires';
+        errorDiv.classList.remove('d-none');
+        return;
+    }
+    if (devPass.length < 10) {
+        errorDiv.textContent = 'Le mot de passe device doit faire au moins 10 caracteres';
+        errorDiv.classList.remove('d-none');
+        return;
+    }
+
+    document.getElementById('bulk-form-section').classList.add('d-none');
+    document.getElementById('bulk-progress-section').classList.remove('d-none');
+    document.getElementById('bulk-footer').querySelector('.btn-success')?.classList.add('d-none');
+
+    const bar = document.getElementById('bulk-progress-bar');
+    const text = document.getElementById('bulk-progress-text');
+    const log = document.getElementById('bulk-log');
+
+    text.textContent = `Creation de ${count} site(s)...`;
+    bar.style.width = '10%';
+    log.innerHTML = '';
+
+    try {
+        const resp = await fetch('/api/sites/bulk-create', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                prefix, count, start,
+                extra: {
+                    region: region,
+                    timeZone: timeZone,
+                    scenario: scenario,
+                    type: siteType,
+                    deviceAccountSetting: {
+                        username: devUser,
+                        password: devPass,
+                    },
+                },
+            }),
+        });
+        const data = await resp.json();
+        bar.style.width = '100%';
+        bar.classList.remove('progress-bar-animated');
+
+        if (data.error) {
+            bar.classList.add('bg-danger');
+            text.textContent = 'Erreur';
+            log.innerHTML = `<div class="text-danger">${escapeHtml(data.error)}</div>`;
+        } else {
+            const results = data.results || [];
+            let okCount = 0;
+            results.forEach(r => {
+                if (r.success) okCount++;
+                const icon = r.success ? '&#10003;' : '&#10007;';
+                log.innerHTML += `<div class="${r.success ? 'text-success' : 'text-danger'}">
+                    ${icon} <strong>${escapeHtml(r.name)}</strong> ${r.success ? '- Cree' : '- ' + escapeHtml(r.msg || 'Echec')}
+                </div>`;
+                log.scrollTop = log.scrollHeight;
+            });
+            bar.classList.add(okCount === results.length ? 'bg-success' : 'bg-warning');
+            text.textContent = `Termine : ${okCount}/${results.length} site(s) cree(s)`;
+        }
+    } catch (err) {
+        bar.style.width = '100%';
+        bar.classList.add('bg-danger');
+        text.textContent = 'Erreur';
+        log.innerHTML = `<div class="text-danger">${escapeHtml(err.message)}</div>`;
+    }
+
+    document.getElementById('bulk-footer').innerHTML = `
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" onclick="loadSites()">
+            <i class="bi bi-x-lg"></i> Fermer et rafraichir
+        </button>`;
+}
+
+loadSites();
+</script>
+{% endblock %}

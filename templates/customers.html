@@ -1,0 +1,1049 @@
+{% extends "base.html" %}
+{% block title %}Clients - Omada API Hub{% endblock %}
+{% block content %}
+<style>
+    .sortable-th { cursor: pointer; user-select: none; }
+    .sortable-th:hover { background-color: rgba(0,0,0,.05); }
+    #cust-toolbar .input-group { flex-shrink: 0; }
+</style>
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-people"></i> Clients</h2>
+    <div class="d-flex gap-2">
+        <button class="btn btn-outline-secondary" id="bulk-delete-cust-btn" onclick="showBulkDeleteCustModal()" disabled>
+            <i class="bi bi-trash"></i> Supprimer (<span id="bulk-delete-cust-count">0</span>)
+        </button>
+        <button class="btn btn-outline-success" onclick="showBulkCreateCustModal()">
+            <i class="bi bi-layers"></i> Creation en masse
+        </button>
+        <button class="btn btn-success" onclick="showCreateCustModal()">
+            <i class="bi bi-plus-lg"></i> Nouveau client
+        </button>
+        <button class="btn btn-outline-secondary" onclick="loadCustomers()">
+            <i class="bi bi-arrow-clockwise"></i>
+        </button>
+    </div>
+</div>
+
+{% if not has_authcode_creds %}
+<div class="alert alert-info py-2 d-flex align-items-center">
+    <i class="bi bi-info-circle me-2"></i>
+    <span>
+        <strong>Creation/Suppression de clients :</strong>
+        Pour activer ces fonctions, reconnectez-vous en renseignant le <em>nom d'utilisateur</em> et <em>mot de passe</em> Omada sur la page de connexion.
+    </span>
+</div>
+{% else %}
+<div class="alert alert-light py-2 d-flex align-items-center justify-content-between border" id="authcode-test-banner">
+    <span>
+        <i class="bi bi-shield-lock text-success me-1"></i>
+        Mode Authorization Code configure
+    </span>
+    <button class="btn btn-outline-primary btn-sm" onclick="testAuthCode()">
+        <i class="bi bi-bug"></i> Tester le flow
+    </button>
+</div>
+<div id="authcode-test-result" class="d-none mb-3"></div>
+{% endif %}
+
+<!-- Barre d'outils : recherche, tri, vue -->
+<div class="d-flex flex-wrap gap-2 align-items-center mb-3" id="cust-toolbar" style="display:none!important">
+    <div class="input-group" style="max-width:300px">
+        <span class="input-group-text"><i class="bi bi-search"></i></span>
+        <input type="text" class="form-control" id="cust-search" placeholder="Rechercher un client..." oninput="renderCustomers()">
+    </div>
+    <div class="input-group" style="max-width:250px">
+        <span class="input-group-text"><i class="bi bi-sort-down"></i></span>
+        <select class="form-select" id="cust-sort" onchange="renderCustomers()">
+            <option value="name-asc">Nom A → Z</option>
+            <option value="name-desc">Nom Z → A</option>
+            <option value="sites-desc">Sites (plus → moins)</option>
+            <option value="sites-asc">Sites (moins → plus)</option>
+            <option value="api-first">Avec API d'abord</option>
+        </select>
+    </div>
+    <div class="btn-group" role="group">
+        <button class="btn btn-outline-secondary active" id="view-cards-btn" onclick="setView('cards')" title="Vue cartes">
+            <i class="bi bi-grid-3x3-gap"></i>
+        </button>
+        <button class="btn btn-outline-secondary" id="view-table-btn" onclick="setView('table')" title="Vue tableau">
+            <i class="bi bi-list-ul"></i>
+        </button>
+    </div>
+    <div class="form-check ms-2">
+        <input class="form-check-input" type="checkbox" id="cust-select-all" onchange="toggleSelectAll()">
+        <label class="form-check-label small" for="cust-select-all">Tout selectionner</label>
+    </div>
+    <span class="badge bg-secondary" id="cust-count-badge">0 client(s)</span>
+</div>
+
+<div id="cust-loading" class="text-center py-5">
+    <div class="spinner-border text-primary" role="status"></div>
+    <p class="mt-2 text-muted">Chargement des clients...</p>
+</div>
+
+<div id="cust-error" class="alert alert-danger d-none"></div>
+
+<div id="cust-empty" class="text-center py-5 d-none">
+    <i class="bi bi-inbox text-muted" style="font-size:3rem"></i>
+    <p class="mt-2 text-muted">Aucun client trouve</p>
+</div>
+
+<div class="row" id="cust-cards-row"></div>
+<div class="table-responsive d-none" id="cust-table-wrapper">
+    <table class="table table-hover align-middle" id="cust-table">
+        <thead class="table-light">
+            <tr>
+                <th style="width:40px"><input type="checkbox" class="form-check-input" id="cust-select-all-table" onchange="toggleSelectAll()"></th>
+                <th class="sortable-th" onclick="sortBy('name')">Nom <i class="bi bi-chevron-expand text-muted small"></i></th>
+                <th class="sortable-th" onclick="sortBy('sites')">Sites <i class="bi bi-chevron-expand text-muted small"></i></th>
+                <th>API</th>
+                <th>ID MSP</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody id="cust-table-body"></tbody>
+    </table>
+</div>
+
+<!-- Modal : configurer l'app Customer -->
+<div class="modal fade" id="customerAppModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-info text-white">
+                <h5 class="modal-title"><i class="bi bi-key"></i> Connexion Client</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>Entrez les identifiants de l'application OpenAPI cree au niveau du client <strong id="modal-customer-name"></strong>.</p>
+                <input type="hidden" id="modal-customer-id">
+                <div class="mb-3">
+                    <label class="form-label">Controller ID <span class="text-muted small">(OmadaC ID du client)</span></label>
+                    <input type="text" class="form-control" id="modal-controller-id" placeholder="Laisser vide = utiliser l'ID MSP du client">
+                    <div class="form-text text-muted">Si le Controller ID du client est different de son ID MSP, renseignez-le ici.</div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Client ID <span class="text-muted small">(App OpenAPI Client)</span></label>
+                    <input type="text" class="form-control" id="modal-client-id" placeholder="ID de l'app OpenAPI Client">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Client Secret <span class="text-muted small">(App OpenAPI Client)</span></label>
+                    <input type="password" class="form-control" id="modal-client-secret" placeholder="Secret de l'app OpenAPI Client">
+                </div>
+                <div class="form-check mb-3">
+                    <input class="form-check-input" type="checkbox" id="modal-save" checked>
+                    <label class="form-check-label" for="modal-save">Sauvegarder pour ce client</label>
+                </div>
+                <div id="modal-error" class="alert alert-danger d-none"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+                <button type="button" class="btn btn-info text-white" id="modal-connect-btn" onclick="connectToCustomer()">
+                    <span class="spinner-border spinner-border-sm d-none" id="modal-spinner"></span>
+                    <i class="bi bi-box-arrow-in-right"></i> Se connecter
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal : creer un client -->
+<div class="modal fade" id="createCustModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title"><i class="bi bi-person-plus"></i> Nouveau client</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label fw-bold">Nom du client *</label>
+                    <input type="text" class="form-control" id="create-cust-name" maxlength="31" placeholder="Ex: Mon Client">
+                    <div class="form-text">1 a 31 caracteres</div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Description</label>
+                    <input type="text" class="form-control" id="create-cust-desc" maxlength="128" placeholder="Optionnel">
+                </div>
+                <div id="create-cust-error" class="alert alert-danger d-none"></div>
+                <div id="create-cust-success" class="alert alert-success d-none"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+                <button type="button" class="btn btn-success" id="create-cust-btn" onclick="executeCreateCust()">
+                    <i class="bi bi-plus-lg"></i> Creer
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal : creation en masse de clients -->
+<div class="modal fade" id="bulkCreateCustModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title"><i class="bi bi-layers"></i> Creation de clients en masse</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="bulk-create-cust-form">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Prefixe du nom</label>
+                        <input type="text" class="form-control" id="bulk-cust-prefix" placeholder="Ex: Client" value="Client">
+                    </div>
+                    <div class="row">
+                        <div class="col-6 mb-3">
+                            <label class="form-label fw-bold">Nombre</label>
+                            <input type="number" class="form-control" id="bulk-cust-count" min="1" max="100" value="3">
+                        </div>
+                        <div class="col-6 mb-3">
+                            <label class="form-label fw-bold">Commencer a</label>
+                            <input type="number" class="form-control" id="bulk-cust-start" min="0" value="1">
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Description (optionnel)</label>
+                        <input type="text" class="form-control" id="bulk-cust-desc" maxlength="128" placeholder="Appliquee a tous les clients">
+                    </div>
+                    <div class="alert alert-info py-2">
+                        <strong>Apercu :</strong> <span id="bulk-cust-preview"></span>
+                    </div>
+                    <div id="bulk-cust-error" class="alert alert-danger d-none"></div>
+                </div>
+                <div id="bulk-create-cust-progress" class="d-none">
+                    <p class="fw-bold mb-2" id="bulk-cust-progress-text">Creation en cours...</p>
+                    <div class="progress mb-3">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated bg-success"
+                             id="bulk-cust-progress-bar" style="width: 0%"></div>
+                    </div>
+                    <div id="bulk-cust-log" class="small bg-light p-2 rounded" style="max-height:250px;overflow-y:auto"></div>
+                </div>
+            </div>
+            <div class="modal-footer" id="bulk-create-cust-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+                <button type="button" class="btn btn-success" id="bulk-create-cust-btn" onclick="executeBulkCreateCust()">
+                    <i class="bi bi-layers"></i> Creer les clients
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal : suppression en masse de clients -->
+<div class="modal fade" id="bulkDeleteCustModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title"><i class="bi bi-exclamation-triangle"></i> Suppression de clients</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="bulk-delete-cust-confirm">
+                    <div class="alert alert-danger">
+                        <i class="bi bi-exclamation-triangle-fill"></i>
+                        Vous etes sur le point de supprimer <strong id="bulk-delete-cust-modal-count">0</strong> client(s).
+                        <strong>Tous les sites et equipements de ces clients seront perdus.</strong>
+                    </div>
+                    <p class="fw-bold mb-2">Clients selectionnes :</p>
+                    <ul id="bulk-delete-cust-list" class="list-group mb-3" style="max-height:200px;overflow-y:auto"></ul>
+                    <div class="mb-3">
+                        <label class="form-label">Tapez <strong>SUPPRIMER</strong> pour confirmer</label>
+                        <input type="text" class="form-control" id="bulk-delete-cust-confirm-input" placeholder="SUPPRIMER">
+                    </div>
+                </div>
+                <div id="bulk-delete-cust-progress" class="d-none">
+                    <p class="fw-bold mb-2" id="bulk-delete-cust-progress-text">Suppression en cours...</p>
+                    <div class="progress mb-3">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated bg-danger"
+                             id="bulk-delete-cust-progress-bar" style="width: 0%"></div>
+                    </div>
+                    <div id="bulk-delete-cust-log" class="small bg-light p-2 rounded" style="max-height:250px;overflow-y:auto"></div>
+                </div>
+            </div>
+            <div class="modal-footer" id="bulk-delete-cust-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+                <button type="button" class="btn btn-danger" id="bulk-delete-cust-confirm-btn" onclick="executeBulkDeleteCust()" disabled>
+                    <i class="bi bi-trash"></i> Supprimer tout
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal : confirmation migration / suppression tous les sites -->
+<div class="modal fade" id="migrateModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title"><i class="bi bi-exclamation-triangle-fill"></i> Migration / Suppression totale</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="migrate-customer-id">
+                <div id="migrate-confirm-section">
+                    <div class="alert alert-danger">
+                        <i class="bi bi-exclamation-triangle-fill"></i>
+                        <strong>Attention !</strong> Cette action va :
+                        <ul class="mb-0 mt-2">
+                            <li>Oublier (forget) <strong>TOUS les equipements</strong> de tous les sites du client <strong id="migrate-customer-name"></strong></li>
+                            <li>Supprimer <strong>TOUS les sites</strong> de ce client</li>
+                        </ul>
+                        <p class="mt-2 mb-0"><strong>Cette action est irreversible.</strong></p>
+                    </div>
+                    <p>Nombre de sites detectes : <strong id="migrate-site-count">-</strong></p>
+                    <p>Confirmez en tapant le nom du client :</p>
+                    <input type="text" class="form-control" id="migrate-confirm-input" placeholder="Nom du client">
+                    <div id="migrate-confirm-error" class="text-danger small mt-1 d-none">Nom incorrect</div>
+                </div>
+                <div id="migrate-progress-section" class="d-none">
+                    <p class="fw-bold mb-2" id="migrate-progress-text">Traitement en cours...</p>
+                    <div class="progress mb-3">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated bg-danger"
+                             id="migrate-progress-bar" style="width: 0%"></div>
+                    </div>
+                    <div id="migrate-log" class="small bg-light p-2 rounded" style="max-height:300px;overflow-y:auto"></div>
+                </div>
+            </div>
+            <div class="modal-footer" id="migrate-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+                <button type="button" class="btn btn-danger" id="migrate-confirm-btn" onclick="executeMigration()">
+                    <i class="bi bi-trash-fill"></i> Supprimer tous les sites
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+let customers = [];
+let enrichedCustomers = [];  // customers with siteCount, hasCreds, etc.
+let currentView = 'cards';   // 'cards' or 'table'
+
+async function loadCustomers() {
+    const loading = document.getElementById('cust-loading');
+    const empty = document.getElementById('cust-empty');
+    const errorDiv = document.getElementById('cust-error');
+    const toolbar = document.getElementById('cust-toolbar');
+
+    loading.classList.remove('d-none');
+    empty.classList.add('d-none');
+    errorDiv.classList.add('d-none');
+    toolbar.style.display = 'none';
+    document.getElementById('cust-cards-row').innerHTML = '';
+    document.getElementById('cust-table-body').innerHTML = '';
+
+    // Reset bulk delete
+    document.getElementById('bulk-delete-cust-btn').disabled = true;
+    document.getElementById('bulk-delete-cust-btn').className = 'btn btn-outline-secondary';
+    document.getElementById('bulk-delete-cust-count').textContent = '0';
+    document.getElementById('cust-select-all').checked = false;
+    document.getElementById('cust-select-all-table').checked = false;
+
+    try {
+        const resp = await fetch('/api/customers');
+        if (resp.status === 401) { window.location.href = '/'; return; }
+        const data = await resp.json();
+        loading.classList.add('d-none');
+
+        if (data.errorCode && data.errorCode !== 0) {
+            errorDiv.textContent = 'Erreur API: ' + (data.msg || JSON.stringify(data));
+            errorDiv.classList.remove('d-none');
+            return;
+        }
+
+        customers = ((data.result || {}).data) || [];
+        if (customers.length === 0) { empty.classList.remove('d-none'); return; }
+
+        // Fetch sites count per customer
+        let sitesPerCustomer = {};
+        try {
+            const sitesResp = await fetch('/api/sites');
+            if (sitesResp.ok) {
+                const sitesData = await sitesResp.json();
+                ((sitesData.result || {}).data || []).forEach(s => {
+                    const cid = s.customerId || '';
+                    sitesPerCustomer[cid] = (sitesPerCustomer[cid] || 0) + 1;
+                });
+            }
+        } catch(e) {}
+
+        // Enrich customers with metadata
+        enrichedCustomers = [];
+        for (const cust of customers) {
+            const custId = cust.id || cust.customerId || '';
+            const custName = cust.name || cust.customerName || 'Client';
+            const siteCount = sitesPerCustomer[custId] || 0;
+            let hasCreds = false, controllerId = '';
+            try {
+                const credResp = await fetch(`/api/credentials/customer-app/${custId}`);
+                if (credResp.ok && credResp.status !== 204) {
+                    const credData = await credResp.json();
+                    hasCreds = !!(credData.client_id);
+                    controllerId = credData.controller_id || '';
+                }
+            } catch(e) {}
+            enrichedCustomers.push({ custId, custName, siteCount, hasCreds, controllerId });
+        }
+
+        // Show toolbar and render
+        toolbar.style.display = '';
+        toolbar.classList.remove('d-none');
+        document.getElementById('cust-count-badge').textContent = `${enrichedCustomers.length} client(s)`;
+        renderCustomers();
+    } catch (err) {
+        loading.classList.add('d-none');
+        errorDiv.textContent = 'Erreur: ' + err.message;
+        errorDiv.classList.remove('d-none');
+    }
+}
+
+function getFilteredSorted() {
+    const search = (document.getElementById('cust-search').value || '').toLowerCase().trim();
+    const sortVal = document.getElementById('cust-sort').value;
+
+    let list = enrichedCustomers.slice();
+
+    // Filter
+    if (search) {
+        list = list.filter(c =>
+            c.custName.toLowerCase().includes(search) ||
+            c.custId.toLowerCase().includes(search) ||
+            c.controllerId.toLowerCase().includes(search)
+        );
+    }
+
+    // Sort
+    list.sort((a, b) => {
+        switch (sortVal) {
+            case 'name-asc':   return a.custName.localeCompare(b.custName, 'fr');
+            case 'name-desc':  return b.custName.localeCompare(a.custName, 'fr');
+            case 'sites-desc': return b.siteCount - a.siteCount || a.custName.localeCompare(b.custName, 'fr');
+            case 'sites-asc':  return a.siteCount - b.siteCount || a.custName.localeCompare(b.custName, 'fr');
+            case 'api-first':  return (b.hasCreds ? 1 : 0) - (a.hasCreds ? 1 : 0) || a.custName.localeCompare(b.custName, 'fr');
+            default: return 0;
+        }
+    });
+
+    return list;
+}
+
+function sortBy(field) {
+    const sel = document.getElementById('cust-sort');
+    if (field === 'name') {
+        sel.value = sel.value === 'name-asc' ? 'name-desc' : 'name-asc';
+    } else if (field === 'sites') {
+        sel.value = sel.value === 'sites-desc' ? 'sites-asc' : 'sites-desc';
+    }
+    renderCustomers();
+}
+
+function renderCustomers() {
+    if (currentView === 'cards') renderCards();
+    else renderTable();
+    updateBulkDeleteCustBtn();
+    // Update filtered count
+    const filtered = getFilteredSorted();
+    const badge = document.getElementById('cust-count-badge');
+    if (filtered.length < enrichedCustomers.length) {
+        badge.textContent = `${filtered.length} / ${enrichedCustomers.length} client(s)`;
+    } else {
+        badge.textContent = `${enrichedCustomers.length} client(s)`;
+    }
+}
+
+function renderCards() {
+    const row = document.getElementById('cust-cards-row');
+    row.innerHTML = '';
+    document.getElementById('cust-cards-row').classList.remove('d-none');
+    document.getElementById('cust-table-wrapper').classList.add('d-none');
+
+    const list = getFilteredSorted();
+    if (list.length === 0) {
+        row.innerHTML = '<div class="col-12 text-center text-muted py-4"><i class="bi bi-search"></i> Aucun resultat</div>';
+        return;
+    }
+
+    for (const c of list) {
+        const ctrlBadge = c.controllerId
+            ? `<span class="badge bg-info text-dark ms-1" title="Controller ID: ${escapeHtml(c.controllerId)}"><i class="bi bi-cpu"></i></span>` : '';
+        const card = document.createElement('div');
+        card.className = 'col-md-6 col-lg-4 mb-3';
+        card.innerHTML = `
+            <div class="card h-100 shadow-sm">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start mb-2">
+                        <div class="form-check">
+                            <input type="checkbox" class="form-check-input cust-checkbox"
+                                   data-cust-id="${c.custId}" data-cust-name="${escapeHtml(c.custName)}"
+                                   onchange="updateBulkDeleteCustBtn()">
+                            <label class="form-check-label">
+                                <h5 class="card-title mb-0"><i class="bi bi-person-badge"></i> ${escapeHtml(c.custName)}</h5>
+                            </label>
+                        </div>
+                        <div>
+                            ${c.hasCreds ? '<span class="badge bg-success"><i class="bi bi-key-fill"></i> API</span>' : '<span class="badge bg-secondary">Pas d\'app</span>'}
+                            ${ctrlBadge}
+                        </div>
+                    </div>
+                    <p class="text-muted small mb-1">ID MSP: <code>${escapeHtml(c.custId).substring(0, 16)}...</code></p>
+                    ${c.controllerId ? `<p class="text-muted small mb-1">Controller ID: <code>${escapeHtml(c.controllerId).substring(0, 16)}...</code></p>` : ''}
+                    <p class="mb-3"><span class="badge bg-primary">${c.siteCount} site(s)</span></p>
+                    <div class="d-grid gap-2">
+                        ${c.hasCreds
+                            ? `<button class="btn btn-info text-white" onclick="quickConnect('${c.custId}', '${escapeHtml(c.custName)}')">
+                                   <i class="bi bi-box-arrow-in-right"></i> Acceder
+                               </button>
+                               <button class="btn btn-outline-secondary btn-sm" onclick="showCustomerModal('${c.custId}', '${escapeHtml(c.custName)}')">
+                                   <i class="bi bi-gear"></i> Modifier les credentials
+                               </button>`
+                            : `<button class="btn btn-outline-info" onclick="showCustomerModal('${c.custId}', '${escapeHtml(c.custName)}')">
+                                   <i class="bi bi-key"></i> Configurer l'app Client
+                               </button>`
+                        }
+                        <button class="btn btn-outline-danger btn-sm" onclick="showMigrateModal('${c.custId}', '${escapeHtml(c.custName)}', ${c.siteCount})">
+                            <i class="bi bi-trash-fill"></i> Supprimer tous les sites
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+        row.appendChild(card);
+    }
+}
+
+function renderTable() {
+    const tbody = document.getElementById('cust-table-body');
+    tbody.innerHTML = '';
+    document.getElementById('cust-cards-row').classList.add('d-none');
+    document.getElementById('cust-table-wrapper').classList.remove('d-none');
+
+    const list = getFilteredSorted();
+    if (list.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4"><i class="bi bi-search"></i> Aucun resultat</td></tr>';
+        return;
+    }
+
+    for (const c of list) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td>
+                <input type="checkbox" class="form-check-input cust-checkbox"
+                       data-cust-id="${c.custId}" data-cust-name="${escapeHtml(c.custName)}"
+                       onchange="updateBulkDeleteCustBtn()">
+            </td>
+            <td>
+                <strong><i class="bi bi-person-badge"></i> ${escapeHtml(c.custName)}</strong>
+                ${c.controllerId ? `<br><span class="text-muted small">Ctrl: <code>${escapeHtml(c.controllerId).substring(0, 16)}...</code></span>` : ''}
+            </td>
+            <td><span class="badge bg-primary">${c.siteCount}</span></td>
+            <td>${c.hasCreds ? '<span class="badge bg-success"><i class="bi bi-key-fill"></i> API</span>' : '<span class="badge bg-secondary">-</span>'}</td>
+            <td><code class="small">${escapeHtml(c.custId).substring(0, 16)}...</code></td>
+            <td>
+                <div class="btn-group btn-group-sm">
+                    ${c.hasCreds
+                        ? `<button class="btn btn-info text-white" onclick="quickConnect('${c.custId}', '${escapeHtml(c.custName)}')" title="Acceder">
+                               <i class="bi bi-box-arrow-in-right"></i>
+                           </button>
+                           <button class="btn btn-outline-secondary" onclick="showCustomerModal('${c.custId}', '${escapeHtml(c.custName)}')" title="Credentials">
+                               <i class="bi bi-gear"></i>
+                           </button>`
+                        : `<button class="btn btn-outline-info" onclick="showCustomerModal('${c.custId}', '${escapeHtml(c.custName)}')" title="Configurer API">
+                               <i class="bi bi-key"></i>
+                           </button>`
+                    }
+                    <button class="btn btn-outline-danger" onclick="showMigrateModal('${c.custId}', '${escapeHtml(c.custName)}', ${c.siteCount})" title="Supprimer les sites">
+                        <i class="bi bi-trash-fill"></i>
+                    </button>
+                </div>
+            </td>
+        `;
+        tbody.appendChild(tr);
+    }
+}
+
+function setView(view) {
+    currentView = view;
+    document.getElementById('view-cards-btn').classList.toggle('active', view === 'cards');
+    document.getElementById('view-table-btn').classList.toggle('active', view === 'table');
+    renderCustomers();
+}
+
+function toggleSelectAll() {
+    const checked = event.target.checked;
+    document.querySelectorAll('.cust-checkbox').forEach(cb => cb.checked = checked);
+    // Sync both select-all checkboxes
+    document.getElementById('cust-select-all').checked = checked;
+    document.getElementById('cust-select-all-table').checked = checked;
+    updateBulkDeleteCustBtn();
+}
+
+// ==================== Bulk select customers ====================
+function updateBulkDeleteCustBtn() {
+    const checked = document.querySelectorAll('.cust-checkbox:checked');
+    const btn = document.getElementById('bulk-delete-cust-btn');
+    const countSpan = document.getElementById('bulk-delete-cust-count');
+    countSpan.textContent = checked.length;
+    if (checked.length > 0) {
+        btn.disabled = false;
+        btn.className = 'btn btn-danger';
+    } else {
+        btn.disabled = true;
+        btn.className = 'btn btn-outline-secondary';
+    }
+}
+
+function getSelectedCustomers() {
+    const selected = [];
+    document.querySelectorAll('.cust-checkbox:checked').forEach(cb => {
+        selected.push({ id: cb.dataset.custId, name: cb.dataset.custName });
+    });
+    return selected;
+}
+
+// ==================== Create single customer ====================
+function showCreateCustModal() {
+    document.getElementById('create-cust-name').value = '';
+    document.getElementById('create-cust-desc').value = '';
+    document.getElementById('create-cust-error').classList.add('d-none');
+    document.getElementById('create-cust-success').classList.add('d-none');
+    document.getElementById('create-cust-btn').disabled = false;
+    new bootstrap.Modal(document.getElementById('createCustModal')).show();
+}
+
+async function executeCreateCust() {
+    const name = document.getElementById('create-cust-name').value.trim();
+    const desc = document.getElementById('create-cust-desc').value.trim();
+    const errorDiv = document.getElementById('create-cust-error');
+    const successDiv = document.getElementById('create-cust-success');
+
+    if (!name) {
+        errorDiv.textContent = 'Le nom est obligatoire';
+        errorDiv.classList.remove('d-none');
+        return;
+    }
+
+    document.getElementById('create-cust-btn').disabled = true;
+    errorDiv.classList.add('d-none');
+
+    try {
+        const body = { customerName: name };
+        if (desc) body.description = desc;
+        const resp = await fetch('/api/customers', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(body),
+        });
+        const data = await resp.json();
+        if (resp.ok && (!data.errorCode || data.errorCode === 0)) {
+            successDiv.textContent = `Client "${name}" cree !`;
+            successDiv.classList.remove('d-none');
+            setTimeout(() => {
+                bootstrap.Modal.getInstance(document.getElementById('createCustModal')).hide();
+                loadCustomers();
+            }, 1500);
+        } else {
+            errorDiv.textContent = data.error || data.msg || 'Erreur lors de la creation';
+            errorDiv.classList.remove('d-none');
+            document.getElementById('create-cust-btn').disabled = false;
+        }
+    } catch (err) {
+        errorDiv.textContent = err.message;
+        errorDiv.classList.remove('d-none');
+        document.getElementById('create-cust-btn').disabled = false;
+    }
+}
+
+// ==================== Bulk create customers ====================
+function showBulkCreateCustModal() {
+    document.getElementById('bulk-create-cust-form').classList.remove('d-none');
+    document.getElementById('bulk-create-cust-progress').classList.add('d-none');
+    document.getElementById('bulk-cust-error').classList.add('d-none');
+    document.getElementById('bulk-create-cust-footer').innerHTML = `
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+        <button type="button" class="btn btn-success" onclick="executeBulkCreateCust()">
+            <i class="bi bi-layers"></i> Creer les clients
+        </button>`;
+    document.getElementById('bulk-cust-log').innerHTML = '';
+    updateCustPreview();
+    new bootstrap.Modal(document.getElementById('bulkCreateCustModal')).show();
+}
+
+['bulk-cust-prefix', 'bulk-cust-count', 'bulk-cust-start'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('input', updateCustPreview);
+});
+
+function updateCustPreview() {
+    const prefix = document.getElementById('bulk-cust-prefix').value || 'Client';
+    const count = parseInt(document.getElementById('bulk-cust-count').value) || 1;
+    const start = parseInt(document.getElementById('bulk-cust-start').value) || 1;
+    const names = [];
+    const maxShow = Math.min(count, 5);
+    for (let i = 0; i < maxShow; i++) names.push(`${prefix} ${start + i}`);
+    if (count > 5) names.push('...');
+    document.getElementById('bulk-cust-preview').textContent = names.join(', ');
+}
+
+async function executeBulkCreateCust() {
+    const prefix = document.getElementById('bulk-cust-prefix').value.trim();
+    const count = parseInt(document.getElementById('bulk-cust-count').value) || 1;
+    const start = parseInt(document.getElementById('bulk-cust-start').value) || 1;
+    const description = document.getElementById('bulk-cust-desc').value.trim();
+    const errorDiv = document.getElementById('bulk-cust-error');
+
+    if (!prefix) {
+        errorDiv.textContent = 'Le prefixe est obligatoire';
+        errorDiv.classList.remove('d-none');
+        return;
+    }
+
+    document.getElementById('bulk-create-cust-form').classList.add('d-none');
+    document.getElementById('bulk-create-cust-progress').classList.remove('d-none');
+    document.getElementById('bulk-create-cust-footer').querySelector('.btn-success')?.classList.add('d-none');
+
+    const bar = document.getElementById('bulk-cust-progress-bar');
+    const text = document.getElementById('bulk-cust-progress-text');
+    const log = document.getElementById('bulk-cust-log');
+    log.innerHTML = '';
+    bar.style.width = '10%';
+    text.textContent = `Creation de ${count} client(s)...`;
+
+    try {
+        const resp = await fetch('/api/customers/bulk-create', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ prefix, count, start, description }),
+        });
+        const data = await resp.json();
+        bar.style.width = '100%';
+        bar.classList.remove('progress-bar-animated');
+
+        const results = data.results || [];
+        let success = 0;
+        results.forEach(r => {
+            if (r.success) success++;
+            log.innerHTML += `<div class="${r.success ? 'text-success' : 'text-danger'}">
+                <i class="bi bi-${r.success ? 'check-circle' : 'x-circle'}"></i>
+                ${escapeHtml(r.name)} - ${r.success ? 'cree' : escapeHtml(r.msg)}
+            </div>`;
+        });
+        text.textContent = `Termine : ${success}/${results.length} client(s) cree(s)`;
+    } catch (err) {
+        bar.style.width = '100%';
+        bar.classList.add('bg-danger');
+        text.textContent = 'Erreur: ' + err.message;
+    }
+
+    document.getElementById('bulk-create-cust-footer').innerHTML = `
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" onclick="loadCustomers()">Fermer</button>`;
+}
+
+// ==================== Bulk delete customers ====================
+function showBulkDeleteCustModal() {
+    const custs = getSelectedCustomers();
+    if (custs.length === 0) return;
+
+    document.getElementById('bulk-delete-cust-modal-count').textContent = custs.length;
+    const list = document.getElementById('bulk-delete-cust-list');
+    list.innerHTML = '';
+    custs.forEach(c => {
+        const li = document.createElement('li');
+        li.className = 'list-group-item py-1';
+        li.textContent = c.name;
+        list.appendChild(li);
+    });
+
+    document.getElementById('bulk-delete-cust-confirm').classList.remove('d-none');
+    document.getElementById('bulk-delete-cust-progress').classList.add('d-none');
+    document.getElementById('bulk-delete-cust-confirm-input').value = '';
+    document.getElementById('bulk-delete-cust-confirm-btn').disabled = true;
+    document.getElementById('bulk-delete-cust-footer').querySelector('.btn-secondary').classList.remove('d-none');
+    document.getElementById('bulk-delete-cust-confirm-btn').classList.remove('d-none');
+
+    new bootstrap.Modal(document.getElementById('bulkDeleteCustModal')).show();
+}
+
+document.getElementById('bulk-delete-cust-confirm-input').addEventListener('input', function() {
+    document.getElementById('bulk-delete-cust-confirm-btn').disabled = this.value.trim() !== 'SUPPRIMER';
+});
+
+async function executeBulkDeleteCust() {
+    const custs = getSelectedCustomers();
+    if (custs.length === 0) return;
+
+    document.getElementById('bulk-delete-cust-confirm').classList.add('d-none');
+    document.getElementById('bulk-delete-cust-progress').classList.remove('d-none');
+    document.getElementById('bulk-delete-cust-confirm-btn').classList.add('d-none');
+    document.getElementById('bulk-delete-cust-footer').querySelector('.btn-secondary').classList.add('d-none');
+
+    const bar = document.getElementById('bulk-delete-cust-progress-bar');
+    const text = document.getElementById('bulk-delete-cust-progress-text');
+    const log = document.getElementById('bulk-delete-cust-log');
+    log.innerHTML = '';
+
+    let success = 0, failed = 0;
+
+    for (let i = 0; i < custs.length; i++) {
+        const c = custs[i];
+        const pct = Math.round(((i + 1) / custs.length) * 100);
+        text.textContent = `Suppression ${i + 1}/${custs.length} : ${c.name}...`;
+        bar.style.width = pct + '%';
+
+        try {
+            const resp = await fetch(`/api/customers/${c.id}`, { method: 'DELETE' });
+            const data = await resp.json();
+            if (resp.ok && (!data.errorCode || data.errorCode === 0)) {
+                success++;
+                log.innerHTML += `<div class="text-success"><i class="bi bi-check-circle"></i> ${escapeHtml(c.name)} - supprime</div>`;
+            } else {
+                failed++;
+                log.innerHTML += `<div class="text-danger"><i class="bi bi-x-circle"></i> ${escapeHtml(c.name)} - ${escapeHtml(data.msg || 'Erreur')}</div>`;
+            }
+        } catch (err) {
+            failed++;
+            log.innerHTML += `<div class="text-danger"><i class="bi bi-x-circle"></i> ${escapeHtml(c.name)} - ${escapeHtml(err.message)}</div>`;
+        }
+        log.scrollTop = log.scrollHeight;
+    }
+
+    bar.classList.remove('progress-bar-animated');
+    bar.style.width = '100%';
+    text.textContent = `Termine : ${success} supprime(s), ${failed} erreur(s)`;
+
+    document.getElementById('bulk-delete-cust-footer').querySelector('.btn-secondary').classList.remove('d-none');
+    document.getElementById('bulk-delete-cust-footer').querySelector('.btn-secondary').textContent = 'Fermer';
+
+    setTimeout(() => {
+        bootstrap.Modal.getInstance(document.getElementById('bulkDeleteCustModal'))?.hide();
+        loadCustomers();
+    }, 3000);
+}
+
+// ==================== Customer app modal ====================
+async function showCustomerModal(customerId, customerName) {
+    document.getElementById('modal-customer-id').value = customerId;
+    document.getElementById('modal-customer-name').textContent = customerName;
+    document.getElementById('modal-client-id').value = '';
+    document.getElementById('modal-client-secret').value = '';
+    document.getElementById('modal-controller-id').value = '';
+    document.getElementById('modal-error').classList.add('d-none');
+
+    try {
+        const resp = await fetch(`/api/credentials/customer-app/${customerId}`);
+        if (resp.ok && resp.status !== 204) {
+            const data = await resp.json();
+            if (data.client_id) {
+                document.getElementById('modal-client-id').value = data.client_id;
+                document.getElementById('modal-client-secret').value = data.client_secret || '';
+                document.getElementById('modal-controller-id').value = data.controller_id || '';
+            }
+        }
+    } catch(e) {}
+
+    new bootstrap.Modal(document.getElementById('customerAppModal')).show();
+}
+
+async function quickConnect(customerId, customerName) {
+    try {
+        const resp = await fetch(`/api/credentials/customer-app/${customerId}`);
+        if (!resp.ok || resp.status === 204) {
+            showCustomerModal(customerId, customerName);
+            return;
+        }
+        const creds = await resp.json();
+        if (!creds.client_id) { showCustomerModal(customerId, customerName); return; }
+
+        await doSwitchToCustomer(customerId, customerName, creds.client_id, creds.client_secret, creds.controller_id || '');
+    } catch (err) {
+        showToast('Erreur: ' + err.message, 'danger');
+    }
+}
+
+async function connectToCustomer() {
+    const customerId = document.getElementById('modal-customer-id').value;
+    const customerName = document.getElementById('modal-customer-name').textContent;
+    const clientId = document.getElementById('modal-client-id').value;
+    const clientSecret = document.getElementById('modal-client-secret').value;
+    const controllerId = document.getElementById('modal-controller-id').value.trim();
+    const errorDiv = document.getElementById('modal-error');
+    const btn = document.getElementById('modal-connect-btn');
+    const spinner = document.getElementById('modal-spinner');
+
+    if (!clientId || !clientSecret) {
+        errorDiv.textContent = 'Client ID et Client Secret sont obligatoires';
+        errorDiv.classList.remove('d-none');
+        return;
+    }
+
+    btn.disabled = true; spinner.classList.remove('d-none'); errorDiv.classList.add('d-none');
+
+    try {
+        if (document.getElementById('modal-save').checked) {
+            await fetch('/api/credentials/customer-app', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    customer_id: customerId,
+                    client_id: clientId,
+                    client_secret: clientSecret,
+                    controller_id: controllerId,
+                }),
+            });
+        }
+
+        await doSwitchToCustomer(customerId, customerName, clientId, clientSecret, controllerId);
+    } catch (err) {
+        errorDiv.textContent = err.message;
+        errorDiv.classList.remove('d-none');
+    } finally { btn.disabled = false; spinner.classList.add('d-none'); }
+}
+
+async function doSwitchToCustomer(customerId, customerName, clientId, clientSecret, controllerId) {
+    const resp = await fetch('/api/switch-customer', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            customer_id: customerId,
+            customer_name: customerName,
+            client_id: clientId,
+            client_secret: clientSecret,
+            controller_id: controllerId || '',
+        }),
+    });
+    const data = await resp.json();
+    if (resp.ok && data.success) {
+        window.location.href = '/sites';
+    } else {
+        throw new Error(data.error || 'Echec de connexion au client');
+    }
+}
+
+// ==================== Migration / Suppression totale ====================
+function showMigrateModal(customerId, customerName, siteCount) {
+    document.getElementById('migrate-customer-id').value = customerId;
+    document.getElementById('migrate-customer-name').textContent = customerName;
+    document.getElementById('migrate-site-count').textContent = siteCount;
+    document.getElementById('migrate-confirm-input').value = '';
+    document.getElementById('migrate-confirm-error').classList.add('d-none');
+    document.getElementById('migrate-confirm-section').classList.remove('d-none');
+    document.getElementById('migrate-progress-section').classList.add('d-none');
+    document.getElementById('migrate-footer').classList.remove('d-none');
+    document.getElementById('migrate-confirm-btn').disabled = false;
+    document.getElementById('migrate-log').innerHTML = '';
+    new bootstrap.Modal(document.getElementById('migrateModal')).show();
+}
+
+async function executeMigration() {
+    const customerId = document.getElementById('migrate-customer-id').value;
+    const customerName = document.getElementById('migrate-customer-name').textContent;
+    const inputName = document.getElementById('migrate-confirm-input').value.trim();
+
+    if (inputName !== customerName) {
+        document.getElementById('migrate-confirm-error').classList.remove('d-none');
+        return;
+    }
+    document.getElementById('migrate-confirm-error').classList.add('d-none');
+
+    document.getElementById('migrate-confirm-section').classList.add('d-none');
+    document.getElementById('migrate-progress-section').classList.remove('d-none');
+    document.getElementById('migrate-footer').classList.add('d-none');
+
+    const bar = document.getElementById('migrate-progress-bar');
+    const text = document.getElementById('migrate-progress-text');
+    const log = document.getElementById('migrate-log');
+
+    text.textContent = 'Traitement en cours...';
+    bar.style.width = '20%';
+    log.innerHTML = '';
+
+    try {
+        const resp = await fetch(`/api/customers/${customerId}/delete-all-sites`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+        });
+        const data = await resp.json();
+        bar.style.width = '100%';
+        bar.classList.remove('progress-bar-animated');
+
+        if (data.error) {
+            bar.classList.add('bg-warning');
+            text.textContent = 'Erreur : ' + data.error;
+            log.innerHTML = `<div class="text-danger">${escapeHtml(data.error)}</div>`;
+        } else {
+            const results = data.results || [];
+            let allOk = true;
+            results.forEach(r => {
+                const ok = r.delete_success;
+                if (!ok) allOk = false;
+                log.innerHTML += `<div class="${ok ? 'text-success' : 'text-danger'}">
+                    <i class="bi bi-${ok ? 'check-circle' : 'x-circle'}"></i>
+                    <strong>${escapeHtml(r.site_name)}</strong> -
+                    ${r.devices_forgotten} device(s) oublie(s)
+                    ${r.forget_errors > 0 ? `<span class="text-warning">(${r.forget_errors} erreur(s) forget)</span>` : ''}
+                    ${ok ? '- Site supprime' : '- <strong>Echec suppression</strong>: ' + escapeHtml(r.delete_msg || '')}
+                </div>`;
+                log.scrollTop = log.scrollHeight;
+            });
+
+            bar.classList.add(allOk ? 'bg-success' : 'bg-warning');
+            text.textContent = `Termine : ${results.length} site(s) traite(s)`;
+
+            if (results.length === 0) {
+                log.innerHTML = '<div class="text-muted">Aucun site trouve pour ce client.</div>';
+            }
+        }
+    } catch (err) {
+        bar.style.width = '100%';
+        bar.classList.remove('progress-bar-animated');
+        bar.classList.add('bg-danger');
+        text.textContent = 'Erreur inattendue';
+        log.innerHTML = `<div class="text-danger">${escapeHtml(err.message)}</div>`;
+    }
+
+    document.getElementById('migrate-footer').innerHTML = `
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" onclick="loadCustomers()">
+            <i class="bi bi-x-lg"></i> Fermer et rafraichir
+        </button>`;
+    document.getElementById('migrate-footer').classList.remove('d-none');
+}
+
+// ==================== Test Auth Code flow ====================
+async function testAuthCode() {
+    const resultDiv = document.getElementById('authcode-test-result');
+    resultDiv.className = 'alert alert-info mb-3';
+    resultDiv.innerHTML = '<i class="bi bi-hourglass-split"></i> Test du flow Authorization Code en cours...';
+
+    try {
+        const resp = await fetch('/api/test-authcode', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+        });
+        const data = await resp.json();
+
+        if (data.success) {
+            resultDiv.className = 'alert alert-success mb-3';
+            resultDiv.innerHTML = '<i class="bi bi-check-circle-fill"></i> <strong>Succes !</strong> Le flow Authorization Code fonctionne. La creation/suppression de clients est disponible.';
+            // Hide banner after success
+            document.getElementById('authcode-test-banner')?.classList.add('d-none');
+        } else {
+            resultDiv.className = 'alert alert-danger mb-3';
+            let html = `<i class="bi bi-x-circle-fill"></i> <strong>Echec :</strong> ${escapeHtml(data.error || 'Erreur inconnue')}<br>`;
+            if (data.steps) {
+                html += '<details class="mt-2"><summary>Details techniques</summary><pre class="mt-1 small">' +
+                    escapeHtml(JSON.stringify(data.steps, null, 2)) + '</pre></details>';
+            }
+            resultDiv.innerHTML = html;
+        }
+    } catch (err) {
+        resultDiv.className = 'alert alert-danger mb-3';
+        resultDiv.innerHTML = `<i class="bi bi-x-circle-fill"></i> Erreur: ${escapeHtml(err.message)}`;
+    }
+}
+
+loadCustomers();
+</script>
+{% endblock %}

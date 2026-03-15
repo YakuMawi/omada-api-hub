@@ -1,0 +1,53 @@
+body {
+    background-color: #f5f7fa;
+}
+
+.card {
+    border: none;
+    border-radius: 0.5rem;
+}
+
+.card.shadow {
+    box-shadow: 0 0.25rem 0.75rem rgba(0, 0, 0, 0.08) !important;
+}
+
+.card.shadow-sm {
+    box-shadow: 0 0.125rem 0.375rem rgba(0, 0, 0, 0.06) !important;
+}
+
+.navbar-brand {
+    font-weight: 600;
+}
+
+.table th {
+    font-weight: 600;
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: #6c757d;
+}
+
+.table td {
+    vertical-align: middle;
+}
+
+.badge {
+    font-weight: 500;
+}
+
+.btn-outline-danger:hover {
+    color: #fff;
+}
+
+.progress {
+    height: 0.6rem;
+    border-radius: 0.3rem;
+}
+
+#forget-log div {
+    padding: 0.15rem 0;
+}
+
+.toast-container {
+    z-index: 1090;
+}

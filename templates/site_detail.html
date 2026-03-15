@@ -1,0 +1,1240 @@
+{% extends "base.html" %}
+{% block title %}Detail du site - Omada API Hub{% endblock %}
+{% block content %}
+
+<div class="d-flex align-items-center mb-4">
+    <a href="{{ url_for('sites_page') }}" class="btn btn-outline-secondary me-3">
+        <i class="bi bi-arrow-left"></i>
+    </a>
+    <div>
+        <h2 class="mb-0" id="site-title">Chargement...</h2>
+        <small class="text-muted" id="site-subtitle"></small>
+    </div>
+</div>
+
+<!-- Site info -->
+<div class="card mb-4">
+    <div class="card-body">
+        <div class="row">
+            {% if not is_customer_mode %}
+            <div class="col-md-3">
+                <small class="text-muted">Client</small>
+                <p class="fw-bold" id="info-customer">-</p>
+            </div>
+            {% endif %}
+            <div class="col-md-3">
+                <small class="text-muted">Region</small>
+                <p class="fw-bold" id="info-region">-</p>
+            </div>
+            <div class="col-md-3">
+                <small class="text-muted">Fuseau horaire</small>
+                <p class="fw-bold" id="info-timezone">-</p>
+            </div>
+            <div class="col-md-3">
+                <small class="text-muted">Type</small>
+                <p class="fw-bold" id="info-type">-</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if is_customer_mode %}
+<div class="alert alert-light border mb-3 py-2 px-3 d-flex align-items-center gap-3">
+    <small class="text-muted"><i class="bi bi-cpu"></i> Controller ID :</small>
+    <code class="text-dark">{{ controller_id }}</code>
+    <button class="btn btn-sm btn-outline-secondary py-0 ms-auto" onclick="navigator.clipboard.writeText('{{ controller_id }}').then(()=>showToast('Controller ID copie','success'))">
+        <i class="bi bi-clipboard"></i>
+    </button>
+</div>
+{% endif %}
+
+<!-- Tabs -->
+<ul class="nav nav-tabs mb-3" id="site-tabs" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-devices" type="button">
+            <i class="bi bi-router"></i> Equipements
+        </button>
+    </li>
+    {% if is_customer_mode %}
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-wifi" type="button">
+            <i class="bi bi-wifi"></i> WiFi / SSID
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-wan" type="button">
+            <i class="bi bi-globe"></i> WAN
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-vpn" type="button">
+            <i class="bi bi-shield-lock"></i> VPN WireGuard
+        </button>
+    </li>
+    {% endif %}
+</ul>
+
+<div class="tab-content">
+
+<!-- ==================== DEVICES TAB ==================== -->
+<div class="tab-pane fade show active" id="tab-devices">
+
+    <!-- Device summary cards -->
+    <div class="row mb-3">
+        <div class="col-md-3">
+            <div class="card text-center border-0 bg-light">
+                <div class="card-body py-2">
+                    <div class="fs-3 fw-bold" id="count-total">-</div>
+                    <small class="text-muted">Total</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center border-0" style="background:#fde8e8">
+                <div class="card-body py-2">
+                    <div class="fs-3 fw-bold text-danger" id="count-gateway">-</div>
+                    <small class="text-muted"><i class="bi bi-hdd-network"></i> Routeurs</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center border-0" style="background:#fff3cd">
+                <div class="card-body py-2">
+                    <div class="fs-3 fw-bold text-warning" id="count-switch">-</div>
+                    <small class="text-muted"><i class="bi bi-ethernet"></i> Switches</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center border-0" style="background:#d1e7dd">
+                <div class="card-body py-2">
+                    <div class="fs-3 fw-bold text-success" id="count-ap">-</div>
+                    <small class="text-muted"><i class="bi bi-wifi"></i> Points d'acces</small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Actions -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h5 class="mb-0">Liste des equipements</h5>
+        <div>
+            <button class="btn btn-warning btn-sm me-1" id="forget-all-btn" onclick="forgetAllDevices()" disabled>
+                <i class="bi bi-eraser"></i> Forget All
+            </button>
+            <button class="btn btn-danger btn-sm" id="forget-delete-btn" onclick="forgetAndDeleteSite()" disabled>
+                <i class="bi bi-trash"></i> Forget All + Supprimer site
+            </button>
+        </div>
+    </div>
+
+    <!-- Filter by type -->
+    <div class="btn-group mb-3" id="type-filter">
+        <button class="btn btn-sm btn-outline-secondary active" data-filter="all">Tous</button>
+        <button class="btn btn-sm btn-outline-danger" data-filter="gateway"><i class="bi bi-hdd-network"></i> Routeurs</button>
+        <button class="btn btn-sm btn-outline-warning" data-filter="switch"><i class="bi bi-ethernet"></i> Switches</button>
+        <button class="btn btn-sm btn-outline-success" data-filter="ap"><i class="bi bi-wifi"></i> AP</button>
+    </div>
+
+    <div id="devices-loading" class="text-center py-4">
+        <div class="spinner-border text-primary spinner-border-sm"></div>
+        <span class="ms-2 text-muted">Chargement des equipements...</span>
+    </div>
+
+    <div id="devices-empty" class="text-center py-4 d-none">
+        <i class="bi bi-inbox text-muted" style="font-size:2rem"></i>
+        <p class="mt-2 text-muted">Aucun equipement sur ce site</p>
+    </div>
+
+    <div class="table-responsive d-none" id="devices-table-wrapper">
+        <table class="table table-hover align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th>Nom</th>
+                    <th>MAC</th>
+                    <th>Type</th>
+                    <th>Modele</th>
+                    <th>IP</th>
+                    <th>Statut</th>
+                    <th class="text-end">Action</th>
+                </tr>
+            </thead>
+            <tbody id="devices-tbody"></tbody>
+        </table>
+    </div>
+
+    <!-- Forget progress -->
+    <div id="forget-progress-wrapper" class="d-none mt-3">
+        <div class="card">
+            <div class="card-body">
+                <p class="mb-2 fw-bold" id="forget-progress-text">Forget en cours...</p>
+                <div class="progress mb-2">
+                    <div class="progress-bar progress-bar-striped progress-bar-animated"
+                         id="forget-progress-bar" style="width: 0%"></div>
+                </div>
+                <div id="forget-log" class="small" style="max-height:250px;overflow-y:auto"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if is_customer_mode %}
+<!-- ==================== WIFI TAB ==================== -->
+<div class="tab-pane fade" id="tab-wifi">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h5 class="mb-0"><i class="bi bi-wifi"></i> Reseaux WiFi (SSIDs)</h5>
+        <button class="btn btn-outline-primary btn-sm" onclick="loadWifiSsids()">
+            <i class="bi bi-arrow-clockwise"></i> Rafraichir
+        </button>
+    </div>
+    <div id="wifi-loading" class="text-center py-4">
+        <div class="spinner-border text-primary spinner-border-sm"></div>
+        <span class="ms-2 text-muted">Chargement des SSIDs...</span>
+    </div>
+    <div id="wifi-error" class="alert alert-danger d-none"></div>
+    <div id="wifi-empty" class="text-center py-4 d-none">
+        <i class="bi bi-wifi-off text-muted" style="font-size:2rem"></i>
+        <p class="mt-2 text-muted">Aucun SSID configure</p>
+    </div>
+    <div id="wifi-raw" class="d-none mb-3">
+        <div class="alert alert-warning py-2"><i class="bi bi-info-circle"></i> Format brut retourne par l'API :</div>
+        <pre class="bg-light p-3 rounded small" id="wifi-raw-data"></pre>
+    </div>
+    <div id="wifi-list" class="row g-3"></div>
+</div>
+
+<!-- Modal : editer un SSID -->
+<div class="modal fade" id="ssidEditModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title"><i class="bi bi-pencil"></i> Modifier le SSID</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="ssid-edit-id">
+                <input type="hidden" id="ssid-edit-fullobj">
+                <div class="mb-3">
+                    <label class="form-label fw-bold">Nom du SSID</label>
+                    <input type="text" class="form-control" id="ssid-edit-name" placeholder="Nom du SSID">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label fw-bold">Mot de passe <span class="text-muted small">(laisser vide pour ne pas modifier)</span></label>
+                    <input type="text" class="form-control" id="ssid-edit-password" placeholder="Mot de passe WiFi">
+                </div>
+                <div class="mb-3 form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="ssid-edit-enable">
+                    <label class="form-check-label" for="ssid-edit-enable">Activer ce SSID</label>
+                </div>
+                <div id="ssid-edit-error" class="alert alert-danger d-none"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+                <button type="button" class="btn btn-primary" id="ssid-save-btn" onclick="saveSsidEdit()">
+                    <span class="spinner-border spinner-border-sm d-none" id="ssid-save-spinner"></span>
+                    <i class="bi bi-check-lg"></i> Enregistrer
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ==================== WAN TAB ==================== -->
+<div class="tab-pane fade" id="tab-wan">
+    <div id="wan-loading" class="text-center py-4">
+        <div class="spinner-border text-primary spinner-border-sm"></div>
+        <span class="ms-2 text-muted">Chargement des informations WAN...</span>
+    </div>
+    <div id="wan-error" class="alert alert-danger d-none"></div>
+    <div id="wan-content" class="d-none">
+
+        <!-- IP publiques WAN — résumé visuel -->
+        <div class="row mb-4" id="wan-ip-summary"></div>
+
+        <!-- Détails par port WAN -->
+        <div class="row" id="wan-cards-row"></div>
+
+        <div class="mt-3 d-flex align-items-center gap-2 flex-wrap">
+            <button class="btn btn-outline-primary btn-sm" onclick="loadWanInfo()">
+                <i class="bi bi-arrow-clockwise"></i> Rafraichir
+            </button>
+            <button class="btn btn-outline-secondary btn-sm" onclick="loadWanDebug()">
+                <i class="bi bi-code-slash"></i> Données brutes
+            </button>
+            <small class="text-muted" id="wan-last-update"></small>
+        </div>
+        <div id="wan-debug-section" class="d-none mt-3">
+            <div class="card border-warning">
+                <div class="card-header bg-warning bg-opacity-10 d-flex justify-content-between align-items-center py-2">
+                    <span class="fw-bold small"><i class="bi bi-bug"></i> Réponse brute API gateway</span>
+                    <button class="btn btn-sm btn-outline-secondary py-0" onclick="document.getElementById('wan-debug-section').classList.add('d-none')">✕</button>
+                </div>
+                <div class="card-body p-0">
+                    <pre id="wan-debug-data" class="m-0 p-3 small" style="max-height:400px;overflow:auto;background:#f8f9fa;white-space:pre-wrap"></pre>
+                </div>
+            </div>
+        </div>
+
+        <!-- Gateway details -->
+        <div class="card mt-4" id="gateway-card">
+            <div class="card-header"><i class="bi bi-hdd-network"></i> Gateway</div>
+            <div class="card-body" id="gateway-details">
+                <span class="text-muted">Chargement...</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ==================== VPN TAB ==================== -->
+<div class="tab-pane fade" id="tab-vpn">
+    <div id="vpn-loading" class="text-center py-4">
+        <div class="spinner-border text-primary spinner-border-sm"></div>
+        <span class="ms-2 text-muted">Chargement des tunnels WireGuard...</span>
+    </div>
+    <div id="vpn-error" class="alert alert-danger d-none"></div>
+    <div id="vpn-content" class="d-none">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h5 class="mb-0"><i class="bi bi-shield-lock"></i> Tunnels WireGuard</h5>
+            <button class="btn btn-outline-primary btn-sm" onclick="loadVpnInfo()">
+                <i class="bi bi-arrow-clockwise"></i> Rafraichir
+            </button>
+        </div>
+        <div id="wg-tunnels-empty" class="text-center py-4 d-none">
+            <i class="bi bi-shield text-muted" style="font-size:2rem"></i>
+            <p class="mt-2 text-muted">Aucun tunnel WireGuard configure</p>
+        </div>
+        <div id="wg-tunnels-list">
+            <!-- Dynamically filled -->
+        </div>
+
+        <hr class="my-4">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h5 class="mb-0"><i class="bi bi-people"></i> Peers WireGuard</h5>
+        </div>
+        <div id="wg-peers-empty" class="text-center py-4 d-none">
+            <i class="bi bi-person text-muted" style="font-size:2rem"></i>
+            <p class="mt-2 text-muted">Aucun peer configure</p>
+        </div>
+        <div id="wg-peers-list">
+            <!-- Dynamically filled -->
+        </div>
+    </div>
+</div>
+{% endif %}
+
+</div><!-- end tab-content -->
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const SITE_ID = '{{ site_id }}';
+const PROFILE_MODE = '{{ profile_mode }}';
+let siteDevices = [];
+let siteCustomerId = '';
+let currentFilter = 'all';
+
+const STATUS_MAP = {
+    0: {label: 'Deconnecte', cls: 'bg-danger'},
+    1: {label: 'Connecte', cls: 'bg-success'},
+    2: {label: 'En attente', cls: 'bg-warning text-dark'},
+    3: {label: 'Heartbeat manque', cls: 'bg-warning text-dark'},
+    4: {label: 'Isole', cls: 'bg-secondary'},
+};
+
+function deviceCategory(type) {
+    const t = String(type || '').toLowerCase();
+    // Handle numeric types: 0=gateway, 1=switch, 2=AP
+    if (t === '0' || t === 'gateway' || t === 'osg') return 'gateway';
+    if (t === '1' || t === 'switch' || t === 'osw') return 'switch';
+    if (t === '2' || t === 'ap' || t === 'eap') return 'ap';
+    return 'other';
+}
+
+function deviceTypeIcon(cat) {
+    if (cat === 'gateway') return '<span class="badge bg-danger"><i class="bi bi-hdd-network"></i> Routeur</span>';
+    if (cat === 'switch') return '<span class="badge bg-warning text-dark"><i class="bi bi-ethernet"></i> Switch</span>';
+    if (cat === 'ap') return '<span class="badge bg-success"><i class="bi bi-wifi"></i> AP</span>';
+    return '<span class="badge bg-secondary"><i class="bi bi-device-hdd"></i> Autre</span>';
+}
+
+// Filter buttons
+document.querySelectorAll('#type-filter .btn').forEach(btn => {
+    btn.addEventListener('click', function() {
+        document.querySelectorAll('#type-filter .btn').forEach(b => b.classList.remove('active'));
+        this.classList.add('active');
+        currentFilter = this.dataset.filter;
+        renderDeviceTable();
+    });
+});
+
+async function loadSiteInfo() {
+    try {
+        const resp = await fetch(`/api/sites/${SITE_ID}`);
+        if (resp.status === 401) { window.location.href = '/'; return; }
+        const data = await resp.json();
+        const site = data.result || {};
+        document.getElementById('site-title').textContent = site.siteName || site.name || 'Site';
+        document.getElementById('site-subtitle').textContent = `ID: ${SITE_ID}`;
+        const infoCustomer = document.getElementById('info-customer');
+        if (infoCustomer) infoCustomer.textContent = site.customerName || '-';
+        document.getElementById('info-region').textContent = site.region || '-';
+        document.getElementById('info-timezone').textContent = site.timeZone || '-';
+        document.getElementById('info-type').textContent = site.type === 1 ? 'Pro' : 'Basic';
+        siteCustomerId = site.customerId || '';
+
+        // Update summary from MSP data
+        const apTotal = (site.connectedApNum || 0) + (site.disconnectedApNum || 0) + (site.isolatedApNum || 0);
+        const swTotal = (site.connectedSwitchNum || 0) + (site.disconnectedSwitchNum || 0);
+        const gwTotal = (site.wan || site.sitePublicIp) ? 1 : 0;
+        document.getElementById('count-total').textContent = apTotal + swTotal + gwTotal;
+        document.getElementById('count-gateway').textContent = gwTotal;
+        document.getElementById('count-switch').textContent = swTotal;
+        document.getElementById('count-ap').textContent = apTotal;
+    } catch (err) {
+        document.getElementById('site-title').textContent = 'Erreur de chargement';
+    }
+}
+
+async function loadDevices() {
+    const loading = document.getElementById('devices-loading');
+    const empty = document.getElementById('devices-empty');
+    const tableWrapper = document.getElementById('devices-table-wrapper');
+
+    loading.classList.remove('d-none');
+    empty.classList.add('d-none');
+    tableWrapper.classList.add('d-none');
+
+    try {
+        const devParams = (PROFILE_MODE !== 'customer' && siteCustomerId) ? `&customerId=${siteCustomerId}` : '';
+        const resp = await fetch(`/api/sites/${SITE_ID}/devices?pageSize=1000${devParams}`);
+        const data = await resp.json();
+        siteDevices = ((data.result || {}).data) || [];
+
+        loading.classList.add('d-none');
+
+        if (siteDevices.length > 0) {
+            let counts = {total: siteDevices.length, ap: 0, switch: 0, gateway: 0};
+            siteDevices.forEach(d => {
+                const cat = deviceCategory(d.type);
+                if (counts[cat] !== undefined) counts[cat]++;
+            });
+            document.getElementById('count-total').textContent = counts.total;
+            document.getElementById('count-gateway').textContent = counts.gateway;
+            document.getElementById('count-switch').textContent = counts.switch;
+            document.getElementById('count-ap').textContent = counts.ap;
+        }
+
+        document.getElementById('forget-all-btn').disabled = siteDevices.length === 0;
+        document.getElementById('forget-delete-btn').disabled = false;
+
+        renderDeviceTable();
+    } catch (err) {
+        loading.classList.add('d-none');
+        showToast('Erreur: ' + err.message, 'danger');
+    }
+}
+
+function renderDeviceTable() {
+    const empty = document.getElementById('devices-empty');
+    const tableWrapper = document.getElementById('devices-table-wrapper');
+    const tbody = document.getElementById('devices-tbody');
+
+    let filtered = siteDevices;
+    if (currentFilter !== 'all') {
+        filtered = siteDevices.filter(d => deviceCategory(d.type) === currentFilter);
+    }
+
+    if (filtered.length === 0) {
+        empty.classList.remove('d-none');
+        tableWrapper.classList.add('d-none');
+        return;
+    }
+
+    empty.classList.add('d-none');
+    tbody.innerHTML = '';
+    filtered.forEach(device => {
+        const cat = deviceCategory(device.type);
+        const statusInfo = STATUS_MAP[device.status] || {label: 'Inconnu', cls: 'bg-secondary'};
+        const tr = document.createElement('tr');
+        tr.id = `device-row-${device.mac}`;
+        tr.innerHTML = `
+            <td>${escapeHtml(device.name || '-')}</td>
+            <td><code>${escapeHtml(device.mac || '-')}</code></td>
+            <td>${deviceTypeIcon(cat)}</td>
+            <td>${escapeHtml(device.model || device.modelName || '-')}</td>
+            <td>${escapeHtml(device.ip || '-')}</td>
+            <td><span class="badge ${statusInfo.cls}">${statusInfo.label}</span></td>
+            <td class="text-end">
+                <button class="btn btn-sm btn-outline-warning" onclick="forgetDevice('${device.mac}', '${escapeHtml(device.name || device.mac)}')">
+                    <i class="bi bi-eraser"></i> Forget
+                </button>
+            </td>
+        `;
+        tbody.appendChild(tr);
+    });
+    tableWrapper.classList.remove('d-none');
+}
+
+function forgetUrl(mac) {
+    const base = `/api/sites/${SITE_ID}/devices/${mac}/forget`;
+    if (PROFILE_MODE !== 'customer' && siteCustomerId) {
+        return base + `?customerId=${siteCustomerId}`;
+    }
+    return base;
+}
+
+async function forgetDevice(mac, name) {
+    if (!confirm(`Oublier l'equipement ${name} (${mac}) ?`)) return;
+    try {
+        const resp = await fetch(forgetUrl(mac), { method: 'POST' });
+        const data = await resp.json();
+        if (resp.ok && (!data.errorCode || data.errorCode === 0)) {
+            showToast(`${name} oublie`, 'success');
+            const row = document.getElementById(`device-row-${mac}`);
+            if (row) row.classList.add('table-secondary');
+            setTimeout(loadDevices, 2000);
+        } else {
+            showToast(`Erreur: ${data.msg || 'Echec'}`, 'danger');
+        }
+    } catch (err) {
+        showToast('Erreur: ' + err.message, 'danger');
+    }
+}
+
+async function runForgetAll() {
+    const wrapper = document.getElementById('forget-progress-wrapper');
+    const bar = document.getElementById('forget-progress-bar');
+    const text = document.getElementById('forget-progress-text');
+    const log = document.getElementById('forget-log');
+
+    wrapper.classList.remove('d-none');
+    log.innerHTML = '';
+    bar.style.width = '0%';
+    bar.className = 'progress-bar progress-bar-striped progress-bar-animated';
+
+    const total = siteDevices.length;
+    let done = 0;
+    let errors = 0;
+
+    for (const device of siteDevices) {
+        const mac = device.mac;
+        const name = device.name || mac;
+        text.textContent = `Forget ${name} (${done + 1}/${total})...`;
+
+        try {
+            const resp = await fetch(forgetUrl(mac), { method: 'POST' });
+            const data = await resp.json();
+            if (resp.ok && (!data.errorCode || data.errorCode === 0)) {
+                log.innerHTML += `<div class="text-success"><i class="bi bi-check"></i> ${escapeHtml(name)}</div>`;
+            } else {
+                log.innerHTML += `<div class="text-danger"><i class="bi bi-x"></i> ${escapeHtml(name)} - ${escapeHtml(data.msg || 'Erreur')}</div>`;
+                errors++;
+            }
+        } catch (err) {
+            log.innerHTML += `<div class="text-danger"><i class="bi bi-x"></i> ${escapeHtml(name)} - ${escapeHtml(err.message)}</div>`;
+            errors++;
+        }
+
+        done++;
+        bar.style.width = `${Math.round((done / total) * 100)}%`;
+        log.scrollTop = log.scrollHeight;
+    }
+
+    bar.classList.remove('progress-bar-animated');
+    bar.classList.add(errors === 0 ? 'bg-success' : 'bg-warning');
+    text.textContent = `Termine : ${done - errors}/${total} OK` + (errors > 0 ? `, ${errors} erreur(s)` : '');
+    return errors === 0;
+}
+
+async function forgetAllDevices() {
+    if (!confirm(`Oublier TOUS les ${siteDevices.length} equipements ?`)) return;
+    document.getElementById('forget-all-btn').disabled = true;
+    document.getElementById('forget-delete-btn').disabled = true;
+    await runForgetAll();
+    setTimeout(loadDevices, 3000);
+}
+
+async function forgetAndDeleteSite() {
+    const msg = siteDevices.length > 0
+        ? `Oublier les ${siteDevices.length} equipement(s) puis SUPPRIMER le site ?`
+        : 'Supprimer ce site ?';
+    if (!confirm(msg)) return;
+
+    document.getElementById('forget-all-btn').disabled = true;
+    document.getElementById('forget-delete-btn').disabled = true;
+
+    const text = document.getElementById('forget-progress-text');
+    const bar = document.getElementById('forget-progress-bar');
+    const log = document.getElementById('forget-log');
+    const wrapper = document.getElementById('forget-progress-wrapper');
+
+    if (siteDevices.length > 0) {
+        await runForgetAll();
+        log.innerHTML += '<div class="text-info mt-2 fw-bold"><i class="bi bi-hourglass-split"></i> Attente avant suppression...</div>';
+        log.scrollTop = log.scrollHeight;
+        await new Promise(r => setTimeout(r, 5000));
+    } else {
+        wrapper.classList.remove('d-none');
+        log.innerHTML = '';
+    }
+
+    text.textContent = 'Suppression du site...';
+    bar.style.width = '90%';
+    bar.className = 'progress-bar progress-bar-striped progress-bar-animated';
+
+    try {
+        const delParams = (PROFILE_MODE !== 'customer' && siteCustomerId) ? `?customerId=${siteCustomerId}` : '';
+        const resp = await fetch(`/api/sites/${SITE_ID}${delParams}`, { method: 'DELETE' });
+        const data = await resp.json();
+        bar.style.width = '100%';
+        bar.classList.remove('progress-bar-animated');
+
+        if (resp.ok && (!data.errorCode || data.errorCode === 0)) {
+            bar.classList.add('bg-success');
+            text.textContent = 'Site supprime !';
+            log.innerHTML += '<div class="text-success fw-bold"><i class="bi bi-check-circle"></i> Site supprime !</div>';
+            setTimeout(() => { window.location.href = '/sites'; }, 2000);
+        } else {
+            bar.classList.add('bg-danger');
+            text.textContent = 'Erreur';
+            log.innerHTML += `<div class="text-danger fw-bold"><i class="bi bi-x-circle"></i> ${escapeHtml(data.msg || 'Erreur')}</div>`;
+        }
+    } catch (err) {
+        bar.style.width = '100%';
+        bar.classList.add('bg-danger');
+        log.innerHTML += `<div class="text-danger fw-bold"><i class="bi bi-x-circle"></i> ${escapeHtml(err.message)}</div>`;
+    }
+    log.scrollTop = log.scrollHeight;
+}
+
+// ==================== WAN TAB (Customer mode) ====================
+async function loadWanInfo() {
+    if (PROFILE_MODE !== 'customer') return;
+    const loading  = document.getElementById('wan-loading');
+    const errorDiv = document.getElementById('wan-error');
+    const content  = document.getElementById('wan-content');
+    const summary  = document.getElementById('wan-ip-summary');
+    const cardsRow = document.getElementById('wan-cards-row');
+
+    loading.classList.remove('d-none');
+    errorDiv.classList.add('d-none');
+    content.classList.add('d-none');
+    summary.innerHTML = '';
+    cardsRow.innerHTML = '';
+
+    try {
+        const resp = await fetch(`/api/sites/${SITE_ID}/wan/ports`);
+        const data = await resp.json();
+        loading.classList.add('d-none');
+
+        if (data.errorCode !== 0) {
+            errorDiv.textContent = 'Erreur WAN: ' + (data.msg || JSON.stringify(data));
+            errorDiv.classList.remove('d-none');
+            content.classList.remove('d-none');
+            loadGatewayInfo();
+            return;
+        }
+
+        const res = data.result || {};
+        const wanPorts = res.wan_ports || [];
+
+        // ── Résumé IP publiques WAN ──────────────────────────────────────
+        if (wanPorts.length > 0) {
+            wanPorts.forEach((p, idx) => {
+                summary.innerHTML += buildWanIpBadge(p, idx);
+            });
+        } else {
+            summary.innerHTML = `<div class="col-12"><span class="text-muted">Aucun port WAN détecté.</span></div>`;
+        }
+
+        // ── Cartes détail par port ────────────────────────────────────────
+        cardsRow.innerHTML = '';
+        wanPorts.forEach((p, idx) => { cardsRow.innerHTML += buildWanCard(p, idx); });
+
+        // Horodatage
+        document.getElementById('wan-last-update').textContent =
+            'Mis à jour : ' + new Date().toLocaleTimeString('fr-FR');
+
+        content.classList.remove('d-none');
+        loadGatewayInfo();
+    } catch (err) {
+        loading.classList.add('d-none');
+        errorDiv.textContent = 'Erreur: ' + err.message;
+        errorDiv.classList.remove('d-none');
+    }
+}
+
+function wanPortTypeLabel(p) {
+    const t = p.portType;
+    const phys = p.physicalType;
+    if (t === 5) return { label: '5G Cellulaire', icon: 'bi-reception-4' };
+    if (t === 4) return { label: 'USB Modem',     icon: 'bi-usb-symbol' };
+    if (t === 3 || phys === 2) return { label: 'SFP+ (10G)',  icon: 'bi-lightning-charge' };
+    if (phys === 1) return { label: 'SFP (1G)',   icon: 'bi-lightning' };
+    return { label: 'Ethernet', icon: 'bi-ethernet' };
+}
+
+function formatLinkSpeed(speed) {
+    if (!speed || speed === 0) return 'Hors ligne';
+    if (speed >= 10000) return '10 Gbps';
+    if (speed >= 1000)  return '1 Gbps';
+    if (speed >= 100)   return '100 Mbps';
+    return speed + ' Mbps';
+}
+
+function wanStateInfo(connState) {
+    if (connState === 'online')  return { color: 'success',   label: 'En ligne' };
+    if (connState === 'backup')  return { color: 'warning',   label: 'En backup' };
+    return                              { color: 'secondary', label: 'Hors ligne' };
+}
+
+/** Grande carte statut WAN */
+function buildWanIpBadge(p, idx) {
+    const name  = p.portName || `WAN${idx + 1}`;
+    const state = wanStateInfo(p.connState);
+    const { label: typeLabel, icon } = wanPortTypeLabel(p);
+    const speed = formatLinkSpeed(p.linkSpeed);
+    const gwLabel = p._gateway_name || '';
+
+    return `
+    <div class="col-md-6 mb-3">
+        <div class="card border-${state.color} h-100">
+            <div class="card-body d-flex align-items-center gap-3 py-3">
+                <div class="rounded-circle bg-${state.color} bg-opacity-10 p-3 flex-shrink-0">
+                    <i class="bi ${icon} text-${state.color}" style="font-size:1.6rem"></i>
+                </div>
+                <div class="flex-grow-1 min-w-0">
+                    <div class="d-flex align-items-center gap-2 mb-1">
+                        <span class="fw-bold">${escapeHtml(name)}</span>
+                        <span class="badge bg-${state.color}">${state.label}</span>
+                        <span class="badge bg-light text-dark border">${escapeHtml(typeLabel)}</span>
+                    </div>
+                    <div class="text-${state.color === 'secondary' ? 'muted' : state.color} fw-bold fs-5">${escapeHtml(speed)}</div>
+                    ${gwLabel ? `<div class="text-muted small mt-1"><i class="bi bi-router"></i> ${escapeHtml(gwLabel)}</div>` : ''}
+                </div>
+            </div>
+        </div>
+    </div>`;
+}
+
+/** Carte détail d'un port WAN */
+function buildWanCard(p, idx) {
+    const name  = p.portName || `WAN${idx + 1}`;
+    const state = wanStateInfo(p.connState);
+    const { label: typeLabel, icon } = wanPortTypeLabel(p);
+    const speed = formatLinkSpeed(p.linkSpeed);
+    const gwName  = p._gateway_name  || '—';
+    const gwModel = p._gateway_model || '';
+
+    return `
+    <div class="col-md-6 mb-3">
+        <div class="card h-100">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi ${icon}"></i> ${escapeHtml(name)}</span>
+                <span class="badge bg-${state.color}">${state.label}</span>
+            </div>
+            <div class="card-body pb-2">
+                <dl class="row mb-0 small">
+                    <dt class="col-5 text-muted">Type</dt>
+                    <dd class="col-7">${escapeHtml(typeLabel)}</dd>
+                    <dt class="col-5 text-muted">Vitesse</dt>
+                    <dd class="col-7"><strong>${escapeHtml(speed)}</strong></dd>
+                    <dt class="col-5 text-muted">Routeur</dt>
+                    <dd class="col-7">${escapeHtml(gwName)}${gwModel ? ` <span class="text-muted">(${escapeHtml(gwModel)})</span>` : ''}</dd>
+                </dl>
+            </div>
+        </div>
+    </div>`;
+}
+
+async function loadWanDebug() {
+    const section = document.getElementById('wan-debug-section');
+    const pre = document.getElementById('wan-debug-data');
+    section.classList.remove('d-none');
+    pre.textContent = 'Chargement...';
+    try {
+        const resp = await fetch(`/api/sites/${SITE_ID}/wan/debug`);
+        const data = await resp.json();
+        pre.textContent = JSON.stringify(data, null, 2);
+    } catch (err) {
+        pre.textContent = 'Erreur: ' + err.message;
+    }
+}
+
+function formatBytes(bytes) {
+    if (bytes == null) return '-';
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+    if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MB';
+    return (bytes / 1073741824).toFixed(2) + ' GB';
+}
+
+async function loadGatewayInfo() {
+    const detailsDiv = document.getElementById('gateway-details');
+    try {
+        const resp = await fetch(`/api/sites/${SITE_ID}/gateway`);
+        const data = await resp.json();
+        if (data.errorCode && data.errorCode !== 0) {
+            detailsDiv.innerHTML = `<span class="text-muted">${escapeHtml(data.msg || 'Aucun gateway')}</span>`;
+            return;
+        }
+        const gw = data.result || {};
+        detailsDiv.innerHTML = `
+            <dl class="row mb-0">
+                <dt class="col-4">Nom</dt>
+                <dd class="col-8">${escapeHtml(gw.name || '-')}</dd>
+                <dt class="col-4">Modele</dt>
+                <dd class="col-8">${escapeHtml(gw.model || gw.modelName || '-')}</dd>
+                <dt class="col-4">MAC</dt>
+                <dd class="col-8"><code>${escapeHtml(gw.mac || '-')}</code></dd>
+                <dt class="col-4">IP</dt>
+                <dd class="col-8">${escapeHtml(gw.ip || '-')}</dd>
+                <dt class="col-4">Firmware</dt>
+                <dd class="col-8">${escapeHtml(gw.firmwareVersion || gw.version || '-')}</dd>
+                <dt class="col-4">Uptime</dt>
+                <dd class="col-8">${gw.uptimeLong ? formatUptime(gw.uptimeLong) : (gw.uptime || '-')}</dd>
+            </dl>`;
+    } catch (err) {
+        detailsDiv.innerHTML = `<span class="text-danger">${escapeHtml(err.message)}</span>`;
+    }
+}
+
+function formatUptime(seconds) {
+    const d = Math.floor(seconds / 86400);
+    const h = Math.floor((seconds % 86400) / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    let s = '';
+    if (d > 0) s += d + 'j ';
+    if (h > 0) s += h + 'h ';
+    s += m + 'min';
+    return s;
+}
+
+// ==================== VPN TAB (Customer mode) ====================
+async function loadVpnInfo() {
+    if (PROFILE_MODE !== 'customer') return;
+    const loading = document.getElementById('vpn-loading');
+    const errorDiv = document.getElementById('vpn-error');
+    const content = document.getElementById('vpn-content');
+
+    loading.classList.remove('d-none');
+    errorDiv.classList.add('d-none');
+    content.classList.add('d-none');
+
+    try {
+        // Load tunnels and peers in parallel
+        const [tunnelsResp, peersResp] = await Promise.all([
+            fetch(`/api/sites/${SITE_ID}/vpn/wireguards`),
+            fetch(`/api/sites/${SITE_ID}/vpn/wireguard-peers`),
+        ]);
+
+        const tunnelsData = await tunnelsResp.json();
+        const peersData = await peersResp.json();
+
+        loading.classList.add('d-none');
+        content.classList.remove('d-none');
+
+        // Render tunnels
+        const tunnelsList = document.getElementById('wg-tunnels-list');
+        const tunnelsEmpty = document.getElementById('wg-tunnels-empty');
+        const tunnels = ((tunnelsData.result || {}).data) || tunnelsData.result || [];
+        const tunnelsArr = Array.isArray(tunnels) ? tunnels : [];
+
+        wgTunnels = tunnelsArr;
+
+        if (tunnelsArr.length === 0) {
+            tunnelsEmpty.classList.remove('d-none');
+            tunnelsList.innerHTML = '';
+            if (tunnelsData.errorCode && tunnelsData.errorCode !== 0) {
+                tunnelsList.innerHTML = `<pre class="bg-light p-3 rounded small">${escapeHtml(JSON.stringify(tunnelsData, null, 2))}</pre>`;
+                tunnelsEmpty.classList.add('d-none');
+            }
+        } else {
+            tunnelsEmpty.classList.add('d-none');
+            tunnelsList.innerHTML = '';
+            tunnelsArr.forEach(t => {
+                tunnelsList.innerHTML += buildWgTunnelCard(t);
+            });
+        }
+
+        // Render peers
+        const peersList = document.getElementById('wg-peers-list');
+        const peersEmpty = document.getElementById('wg-peers-empty');
+        const peers = ((peersData.result || {}).data) || peersData.result || [];
+        const peersArr = Array.isArray(peers) ? peers : [];
+
+        if (peersArr.length === 0) {
+            peersEmpty.classList.remove('d-none');
+            peersList.innerHTML = '';
+            if (peersData.errorCode && peersData.errorCode !== 0) {
+                peersList.innerHTML = `<pre class="bg-light p-3 rounded small">${escapeHtml(JSON.stringify(peersData, null, 2))}</pre>`;
+                peersEmpty.classList.add('d-none');
+            }
+        } else {
+            peersEmpty.classList.add('d-none');
+            peersList.innerHTML = '';
+            peersArr.forEach(p => {
+                peersList.innerHTML += buildWgPeerCard(p);
+            });
+        }
+    } catch (err) {
+        loading.classList.add('d-none');
+        errorDiv.textContent = 'Erreur: ' + err.message;
+        errorDiv.classList.remove('d-none');
+    }
+}
+
+function buildWgTunnelCard(t) {
+    const name = t.name || t.tunnelName || 'Tunnel';
+    const enabled = t.enable !== false && t.enable !== 0 && t.status !== 0;
+    const badgeCls = enabled ? 'bg-success' : 'bg-secondary';
+    const badgeText = enabled ? 'Actif' : 'Inactif';
+    const listenPort = t.listenPort || t.port || '-';
+    const localAddrs = t.localAddresses || t.address || t.ip || '-';
+    const pubKey = t.publicKey || '-';
+    const tunnelId = t.id || t.tunnelId || '';
+    const toggleBtnCls = enabled ? 'btn-outline-secondary' : 'btn-outline-success';
+    const toggleIcon = enabled ? 'bi-pause-circle' : 'bi-play-circle';
+    const toggleText = enabled ? 'Desactiver' : 'Activer';
+
+    return `
+        <div class="card mb-2" id="wg-tunnel-${tunnelId}">
+            <div class="card-body py-2">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <strong><i class="bi bi-shield-lock"></i> ${escapeHtml(name)}</strong>
+                        <span class="badge ${badgeCls} ms-2">${badgeText}</span>
+                    </div>
+                    <div class="btn-group btn-group-sm">
+                        <button class="btn ${toggleBtnCls}" onclick="toggleWgTunnel('${tunnelId}', ${enabled})" ${!tunnelId ? 'disabled' : ''}>
+                            <i class="bi ${toggleIcon}"></i> ${toggleText}
+                        </button>
+                        <button class="btn btn-outline-danger" onclick="deleteWgTunnel('${tunnelId}', '${escapeHtml(name)}')">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="row mt-2 small text-muted">
+                    <div class="col-md-4">Port: <code>${escapeHtml(String(listenPort))}</code></div>
+                    <div class="col-md-4">Adresses: <code>${escapeHtml(String(localAddrs))}</code></div>
+                    <div class="col-md-4">Cle publique: <code class="text-truncate d-inline-block" style="max-width:150px" title="${escapeHtml(pubKey)}">${escapeHtml(pubKey)}</code></div>
+                </div>
+            </div>
+        </div>`;
+}
+
+function buildWgPeerCard(p) {
+    const name = p.name || p.peerName || 'Peer';
+    const enabled = p.enable !== false;
+    const badgeCls = enabled ? 'bg-success' : 'bg-secondary';
+    const badgeText = enabled ? 'Actif' : 'Inactif';
+    const endpoint = p.endpoint || p.remoteAddress || '-';
+    const allowedIPs = p.allowedIPs || p.allowedAddresses || '-';
+    const pubKey = p.publicKey || '-';
+
+    return `
+        <div class="card mb-2">
+            <div class="card-body py-2">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <strong><i class="bi bi-person-badge"></i> ${escapeHtml(name)}</strong>
+                        <span class="badge ${badgeCls} ms-2">${badgeText}</span>
+                    </div>
+                </div>
+                <div class="row mt-2 small text-muted">
+                    <div class="col-md-4">Endpoint: <code>${escapeHtml(String(endpoint))}</code></div>
+                    <div class="col-md-4">IPs autorisees: <code>${escapeHtml(String(allowedIPs))}</code></div>
+                    <div class="col-md-4">Cle publique: <code class="text-truncate d-inline-block" style="max-width:150px" title="${escapeHtml(pubKey)}">${escapeHtml(pubKey)}</code></div>
+                </div>
+            </div>
+        </div>`;
+}
+
+// Store WireGuard tunnels for toggle
+let wgTunnels = [];
+
+async function toggleWgTunnel(tunnelId, currentEnabled) {
+    if (!tunnelId) return;
+    const tunnel = wgTunnels.find(t => (t.id || t.tunnelId) === tunnelId);
+    if (!tunnel) {
+        showToast('Tunnel non trouve', 'danger');
+        return;
+    }
+    const action = currentEnabled ? 'Desactiver' : 'Activer';
+    if (!confirm(`${action} le tunnel WireGuard "${tunnel.name || 'Tunnel'}" ?`)) return;
+
+    try {
+        const payload = { ...tunnel, enable: !currentEnabled };
+        const resp = await fetch(`/api/sites/${SITE_ID}/vpn/wireguards/${tunnelId}`, {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload),
+        });
+        const data = await resp.json();
+        if (resp.ok && (!data.errorCode || data.errorCode === 0)) {
+            showToast(`Tunnel ${!currentEnabled ? 'active' : 'desactive'}`, 'success');
+            loadVpnInfo();
+        } else {
+            showToast('Erreur: ' + (data.msg || 'Echec'), 'danger');
+        }
+    } catch (err) {
+        showToast('Erreur: ' + err.message, 'danger');
+    }
+}
+
+async function deleteWgTunnel(id, name) {
+    if (!id) return;
+    if (!confirm(`Supprimer le tunnel WireGuard "${name}" ?`)) return;
+    try {
+        const resp = await fetch(`/api/sites/${SITE_ID}/vpn/wireguards/${id}`, { method: 'DELETE' });
+        const data = await resp.json();
+        if (resp.ok && (!data.errorCode || data.errorCode === 0)) {
+            showToast(`Tunnel "${name}" supprime`, 'success');
+            loadVpnInfo();
+        } else {
+            showToast('Erreur: ' + (data.msg || 'Echec'), 'danger');
+        }
+    } catch (err) {
+        showToast('Erreur: ' + err.message, 'danger');
+    }
+}
+
+// ==================== WiFi / SSID TAB (Customer mode) ====================
+let wifiSsids = [];
+
+async function loadWifiSsids() {
+    if (PROFILE_MODE !== 'customer') return;
+    const loading = document.getElementById('wifi-loading');
+    const errorDiv = document.getElementById('wifi-error');
+    const empty = document.getElementById('wifi-empty');
+    const list = document.getElementById('wifi-list');
+    const raw = document.getElementById('wifi-raw');
+
+    loading.classList.remove('d-none');
+    errorDiv.classList.add('d-none');
+    empty.classList.add('d-none');
+    list.innerHTML = '';
+    raw.classList.add('d-none');
+
+    try {
+        const resp = await fetch(`/api/sites/${SITE_ID}/wifi/ssids`);
+        const data = await resp.json();
+        loading.classList.add('d-none');
+
+        if (data.errorCode && data.errorCode !== 0) {
+            errorDiv.textContent = 'Erreur API WiFi: ' + (data.msg || JSON.stringify(data));
+            errorDiv.classList.remove('d-none');
+            return;
+        }
+
+        const result = data.result || {};
+        // Try common API response formats for WLAN list
+        let ssids = [];
+        if (Array.isArray(result)) {
+            ssids = result;
+        } else if (Array.isArray(result.data)) {
+            ssids = result.data;
+        } else if (Array.isArray(result.wlanList)) {
+            ssids = result.wlanList;
+        } else if (typeof result === 'object' && Object.keys(result).length > 0) {
+            // Single WLAN or unknown format — show raw
+            document.getElementById('wifi-raw-data').textContent = JSON.stringify(data, null, 2);
+            raw.classList.remove('d-none');
+            return;
+        }
+
+        wifiSsids = ssids;
+
+        if (ssids.length === 0) {
+            empty.classList.remove('d-none');
+            return;
+        }
+
+        ssids.forEach(ssid => renderSsidCard(ssid));
+    } catch (err) {
+        loading.classList.add('d-none');
+        errorDiv.textContent = 'Erreur: ' + err.message;
+        errorDiv.classList.remove('d-none');
+    }
+}
+
+function buildSsidCardHtml(ssid) {
+    const ssidId = ssid.id || ssid.ssidId || ssid._id || '';
+    const wlanId = ssid._wlanId || '';
+    const wlanName = ssid._wlanName || '';
+    const name = ssid.ssid || ssid.name || ssid.ssidName || 'SSID inconnu';
+    const enabled = ssid.enable !== false && ssid.enable !== 0 && ssid.enabled !== false;
+    const security = ssid.security || ssid.securityMode || ssid.encryption || '';
+    const band = ssid.band || ssid.radioBand || '';
+    const vlan = ssid.vlanId || ssid.vlan || '';
+    const hidden = ssid.hideSsid || ssid.hidden || false;
+
+    return `
+        <div class="card h-100 ${enabled ? '' : 'border-secondary opacity-75'}">
+            <div class="card-header d-flex justify-content-between align-items-center py-2">
+                <span class="fw-bold"><i class="bi bi-wifi${enabled ? '' : '-off'}"></i> ${escapeHtml(name)}</span>
+                <span class="badge ${enabled ? 'bg-success' : 'bg-secondary'}">${enabled ? 'Actif' : 'Inactif'}</span>
+            </div>
+            <div class="card-body py-2">
+                <div class="d-flex flex-column gap-1 small text-muted">
+                    ${wlanName ? `<span><i class="bi bi-collection"></i> Groupe: ${escapeHtml(wlanName)}</span>` : ''}
+                    ${security ? `<span><i class="bi bi-lock"></i> ${escapeHtml(String(security))}</span>` : ''}
+                    ${band ? `<span><i class="bi bi-broadcast"></i> ${escapeHtml(String(band))}</span>` : ''}
+                    ${vlan ? `<span><i class="bi bi-diagram-3"></i> VLAN ${escapeHtml(String(vlan))}</span>` : ''}
+                    ${hidden ? `<span><i class="bi bi-eye-slash"></i> SSID masque</span>` : ''}
+                </div>
+            </div>
+            <div class="card-footer py-2 d-flex gap-2">
+                <button class="btn btn-sm ${enabled ? 'btn-outline-secondary' : 'btn-outline-success'} flex-fill"
+                        onclick="toggleSsid('${wlanId}', '${ssidId}', ${enabled})"
+                        ${!ssidId || !wlanId ? 'disabled' : ''}>
+                    <i class="bi bi-${enabled ? 'wifi-off' : 'wifi'}"></i> ${enabled ? 'Desactiver' : 'Activer'}
+                </button>
+                <button class="btn btn-sm btn-outline-primary flex-fill"
+                        onclick="showSsidEditModal('${wlanId}', '${ssidId}')"
+                        ${!ssidId || !wlanId ? 'disabled' : ''}>
+                    <i class="bi bi-pencil"></i> Modifier
+                </button>
+            </div>
+        </div>`;
+}
+
+function renderSsidCard(ssid) {
+    const list = document.getElementById('wifi-list');
+    const ssidId = ssid.id || ssid.ssidId || ssid._id || '';
+    const col = document.createElement('div');
+    col.className = 'col-md-6 col-lg-4';
+    col.id = `ssid-card-${ssidId}`;
+    col.innerHTML = buildSsidCardHtml(ssid);
+    list.appendChild(col);
+}
+
+function renderSsidCardInto(el, ssid) {
+    el.className = 'col-md-6 col-lg-4';
+    el.innerHTML = buildSsidCardHtml(ssid);
+}
+
+async function toggleSsid(wlanId, ssidId, currentEnabled) {
+    if (!wlanId || !ssidId) return;
+    const ssid = wifiSsids.find(s => (s.id || s.ssidId || s._id) === ssidId);
+    if (!ssid) return;
+
+    try {
+        const newState = !currentEnabled;
+        const payload = { ...ssid, enable: newState };
+        // Remove internal fields
+        delete payload._wlanId;
+        delete payload._wlanName;
+        const resp = await fetch(`/api/sites/${SITE_ID}/wifi/ssids/${wlanId}/${ssidId}`, {
+            method: 'PATCH',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload),
+        });
+        const data = await resp.json();
+        if (resp.ok && (!data.errorCode || data.errorCode === 0)) {
+            showToast(`SSID ${newState ? 'active' : 'desactive'}`, 'success');
+            // Update local state and re-render card in place
+            ssid.enable = newState;
+            const oldCard = document.getElementById(`ssid-card-${ssidId}`);
+            if (oldCard) {
+                const tempDiv = document.createElement('div');
+                tempDiv.id = `ssid-card-${ssidId}`;
+                renderSsidCardInto(tempDiv, ssid);
+                oldCard.replaceWith(tempDiv);
+            }
+        } else {
+            const errDetail = data.msg || data.message || JSON.stringify(data);
+            console.error('SSID toggle error:', data);
+            showToast('Erreur SSID: ' + errDetail, 'danger');
+        }
+    } catch (err) {
+        showToast('Erreur: ' + err.message, 'danger');
+    }
+}
+
+function showSsidEditModal(wlanId, ssidId) {
+    const ssid = wifiSsids.find(s => (s.id || s.ssidId || s._id) === ssidId);
+    if (!ssid) return;
+
+    document.getElementById('ssid-edit-id').value = `${wlanId}/${ssidId}`;
+    document.getElementById('ssid-edit-fullobj').value = JSON.stringify(ssid);
+    document.getElementById('ssid-edit-name').value = ssid.ssid || ssid.name || ssid.ssidName || '';
+    document.getElementById('ssid-edit-password').value = '';
+    document.getElementById('ssid-edit-enable').checked = ssid.enable !== false && ssid.enable !== 0;
+    document.getElementById('ssid-edit-error').classList.add('d-none');
+
+    new bootstrap.Modal(document.getElementById('ssidEditModal')).show();
+}
+
+async function saveSsidEdit() {
+    const idParts = document.getElementById('ssid-edit-id').value.split('/');
+    const wlanId = idParts[0] || '';
+    const ssidId = idParts[1] || '';
+    const newName = document.getElementById('ssid-edit-name').value.trim();
+    const newPassword = document.getElementById('ssid-edit-password').value;
+    const enabled = document.getElementById('ssid-edit-enable').checked;
+    const errorDiv = document.getElementById('ssid-edit-error');
+    const btn = document.getElementById('ssid-save-btn');
+    const spinner = document.getElementById('ssid-save-spinner');
+
+    if (!newName) {
+        errorDiv.textContent = 'Le nom du SSID est obligatoire';
+        errorDiv.classList.remove('d-none');
+        return;
+    }
+
+    btn.disabled = true; spinner.classList.remove('d-none'); errorDiv.classList.add('d-none');
+
+    try {
+        let original = {};
+        try { original = JSON.parse(document.getElementById('ssid-edit-fullobj').value); } catch(e) {}
+        // Remove internal fields
+        delete original._wlanId;
+        delete original._wlanName;
+        const payload = {
+            ...original,
+            ssid: newName,
+            name: newName,
+            enable: enabled,
+        };
+        if (newPassword) {
+            payload.password = newPassword;
+            payload.psk = newPassword;
+        }
+
+        const resp = await fetch(`/api/sites/${SITE_ID}/wifi/ssids/${wlanId}/${ssidId}`, {
+            method: 'PATCH',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload),
+        });
+        const data = await resp.json();
+        if (resp.ok && (!data.errorCode || data.errorCode === 0)) {
+            showToast('SSID mis a jour', 'success');
+            bootstrap.Modal.getInstance(document.getElementById('ssidEditModal')).hide();
+            loadWifiSsids();
+        } else {
+            errorDiv.textContent = 'Erreur: ' + (data.msg || JSON.stringify(data));
+            errorDiv.classList.remove('d-none');
+        }
+    } catch (err) {
+        errorDiv.textContent = err.message;
+        errorDiv.classList.remove('d-none');
+    } finally { btn.disabled = false; spinner.classList.add('d-none'); }
+}
+
+// ==================== Tab lazy loading ====================
+document.querySelectorAll('#site-tabs button[data-bs-toggle="tab"]').forEach(tab => {
+    tab.addEventListener('shown.bs.tab', function(e) {
+        const target = e.target.getAttribute('data-bs-target');
+        if (target === '#tab-wifi') loadWifiSsids();
+        if (target === '#tab-wan') loadWanInfo();
+        if (target === '#tab-vpn') loadVpnInfo();
+    });
+});
+
+// ==================== Init ====================
+loadSiteInfo();
+loadDevices();
+</script>
+{% endblock %}

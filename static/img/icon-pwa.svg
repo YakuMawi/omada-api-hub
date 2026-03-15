@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Fond arrondi -->
+  <rect width="512" height="512" rx="112" fill="#0d6efd"/>
+
+  <!-- Anneaux de réseau -->
+  <circle cx="256" cy="256" r="170" fill="#ffffff" opacity="0.07"/>
+  <circle cx="256" cy="256" r="120" fill="#ffffff" opacity="0.10"/>
+  <circle cx="256" cy="256" r="70"  fill="#ffffff" opacity="0.15"/>
+
+  <!-- Nœuds réseau -->
+  <circle cx="256" cy="90"  r="22" fill="#ffffff" opacity="0.85"/>
+  <circle cx="256" cy="422" r="22" fill="#ffffff" opacity="0.85"/>
+  <circle cx="90"  cy="256" r="22" fill="#ffffff" opacity="0.85"/>
+  <circle cx="422" cy="256" r="22" fill="#ffffff" opacity="0.85"/>
+  <circle cx="128" cy="128" r="18" fill="#fed7aa" opacity="0.9"/>
+  <circle cx="384" cy="128" r="18" fill="#a7f3d0" opacity="0.9"/>
+  <circle cx="128" cy="384" r="18" fill="#ddd6fe" opacity="0.9"/>
+  <circle cx="384" cy="384" r="18" fill="#fde68a" opacity="0.9"/>
+
+  <!-- Lignes de connexion -->
+  <line x1="256" y1="256" x2="256" y2="90"  stroke="#ffffff" stroke-width="3" opacity="0.3"/>
+  <line x1="256" y1="256" x2="256" y2="422" stroke="#ffffff" stroke-width="3" opacity="0.3"/>
+  <line x1="256" y1="256" x2="90"  y2="256" stroke="#ffffff" stroke-width="3" opacity="0.3"/>
+  <line x1="256" y1="256" x2="422" y2="256" stroke="#ffffff" stroke-width="3" opacity="0.3"/>
+  <line x1="256" y1="256" x2="128" y2="128" stroke="#ffffff" stroke-width="2" opacity="0.2"/>
+  <line x1="256" y1="256" x2="384" y2="128" stroke="#ffffff" stroke-width="2" opacity="0.2"/>
+  <line x1="256" y1="256" x2="128" y2="384" stroke="#ffffff" stroke-width="2" opacity="0.2"/>
+  <line x1="256" y1="256" x2="384" y2="384" stroke="#ffffff" stroke-width="2" opacity="0.2"/>
+
+  <!-- Hub central -->
+  <circle cx="256" cy="256" r="58" fill="#ffffff"/>
+
+  <!-- Symbole </> -->
+  <text x="256" y="275" text-anchor="middle" fill="#0d6efd"
+        font-family="'Courier New', monospace" font-size="52" font-weight="900">&lt;/&gt;</text>
+</svg>

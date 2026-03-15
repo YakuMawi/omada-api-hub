@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 80" fill="none">
+  <!-- Hub circle -->
+  <circle cx="40" cy="40" r="28" fill="#0d6efd" opacity="0.15"/>
+  <circle cx="40" cy="40" r="20" fill="#0d6efd" opacity="0.3"/>
+  <circle cx="40" cy="40" r="12" fill="#0d6efd"/>
+
+  <!-- Network nodes -->
+  <circle cx="12" cy="16" r="5" fill="#0d6efd" opacity="0.8"/>
+  <circle cx="68" cy="16" r="5" fill="#198754" opacity="0.8"/>
+  <circle cx="12" cy="64" r="5" fill="#6f42c1" opacity="0.8"/>
+  <circle cx="68" cy="64" r="5" fill="#fd7e14" opacity="0.8"/>
+
+  <!-- Connection lines -->
+  <line x1="40" y1="40" x2="12" y2="16" stroke="#0d6efd" stroke-width="2" opacity="0.4"/>
+  <line x1="40" y1="40" x2="68" y2="16" stroke="#198754" stroke-width="2" opacity="0.4"/>
+  <line x1="40" y1="40" x2="12" y2="64" stroke="#6f42c1" stroke-width="2" opacity="0.4"/>
+  <line x1="40" y1="40" x2="68" y2="64" stroke="#fd7e14" stroke-width="2" opacity="0.4"/>
+
+  <!-- Pulse rings -->
+  <circle cx="40" cy="40" r="24" stroke="#0d6efd" stroke-width="1" fill="none" opacity="0.2"/>
+  <circle cx="40" cy="40" r="32" stroke="#0d6efd" stroke-width="0.5" fill="none" opacity="0.1"/>
+
+  <!-- Inner icon: API symbol -->
+  <text x="40" y="45" text-anchor="middle" fill="white" font-family="Arial, sans-serif" font-size="12" font-weight="bold">&lt;/&gt;</text>
+
+  <!-- Text: Omada -->
+  <text x="88" y="35" fill="#212529" font-family="'Segoe UI', Arial, sans-serif" font-size="22" font-weight="300" letter-spacing="1">OMADA</text>
+
+  <!-- Text: API Hub -->
+  <text x="88" y="60" fill="#0d6efd" font-family="'Segoe UI', Arial, sans-serif" font-size="24" font-weight="700" letter-spacing="2">API HUB</text>
+
+  <!-- Accent line -->
+  <rect x="88" y="40" width="45" height="2" rx="1" fill="#0d6efd" opacity="0.3"/>
+</svg>

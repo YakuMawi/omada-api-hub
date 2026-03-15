@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% block title %}Paramètres - Omada API Hub{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h4 class="mb-0"><i class="bi bi-gear"></i> Paramètres</h4>
+</div>
+
+<!-- Version & Mises à jour -->
+<div class="card mb-4">
+    <div class="card-header fw-semibold">
+        <i class="bi bi-arrow-repeat"></i> Version &amp; Mises à jour
+    </div>
+    <div class="card-body">
+        <div class="row align-items-center g-3">
+            <div class="col-auto">
+                <span class="text-muted small">Version installée</span><br>
+                <span class="badge bg-primary fs-6">v{{ current_version }}</span>
+            </div>
+            <div class="col-auto">
+                <button id="btn-check-update" class="btn btn-outline-secondary" onclick="checkUpdate()">
+                    <i class="bi bi-cloud-arrow-down"></i> Vérifier les mises à jour
+                </button>
+            </div>
+        </div>
+
+        <div id="update-result" class="mt-3 d-none">
+            <!-- filled by JS -->
+        </div>
+
+        <div class="mt-3 p-3 bg-light rounded border small text-muted">
+            <strong>Mettre à jour manuellement :</strong><br>
+            <code>cd /home/openapi &amp;&amp; git pull origin main &amp;&amp; pip3 install -r requirements.txt</code><br>
+            Puis redémarrer : <code>sudo systemctl restart omada-api-hub</code>
+        </div>
+    </div>
+</div>
+
+<!-- Compte utilisateur -->
+<div class="card mb-4">
+    <div class="card-header fw-semibold">
+        <i class="bi bi-person-circle"></i> Compte
+    </div>
+    <div class="card-body">
+        <p class="mb-3">Connecté en tant que <strong>{{ app_username }}</strong></p>
+        <button class="btn btn-outline-warning btn-sm" data-bs-toggle="collapse" data-bs-target="#change-pw-form">
+            <i class="bi bi-key"></i> Changer le mot de passe
+        </button>
+        <div id="change-pw-form" class="collapse mt-3">
+            <form id="form-change-pw" class="row g-2" style="max-width:380px">
+                <div class="col-12">
+                    <input type="password" class="form-control form-control-sm" id="pw-current"
+                           placeholder="Mot de passe actuel" required>
+                </div>
+                <div class="col-12">
+                    <input type="password" class="form-control form-control-sm" id="pw-new"
+                           placeholder="Nouveau mot de passe (8 car. min)" minlength="8" required>
+                </div>
+                <div class="col-12">
+                    <input type="password" class="form-control form-control-sm" id="pw-confirm"
+                           placeholder="Confirmer le nouveau mot de passe" required>
+                </div>
+                <div class="col-12">
+                    <button type="submit" class="btn btn-warning btn-sm">
+                        <i class="bi bi-check-lg"></i> Enregistrer
+                    </button>
+                </div>
+                <div id="pw-msg" class="col-12"></div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Infos système -->
+<div class="card mb-4">
+    <div class="card-header fw-semibold">
+        <i class="bi bi-info-circle"></i> Informations
+    </div>
+    <div class="card-body small">
+        <dl class="row mb-0">
+            <dt class="col-sm-4 text-muted">Repository</dt>
+            <dd class="col-sm-8"><a href="https://github.com/YakuMawi/omada-api-hub" target="_blank">github.com/YakuMawi/omada-api-hub</a></dd>
+            <dt class="col-sm-4 text-muted">Licence</dt>
+            <dd class="col-sm-8">MIT</dd>
+        </dl>
+    </div>
+</div>
+
+<script>
+async function checkUpdate() {
+    const btn = document.getElementById('btn-check-update');
+    const res = document.getElementById('update-result');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Vérification…';
+    res.className = 'mt-3';
+    try {
+        const r = await fetch('/api/version/check');
+        const d = await r.json();
+        if (d.error) {
+            res.innerHTML = `<div class="alert alert-warning py-2"><i class="bi bi-exclamation-triangle"></i> Impossible de joindre GitHub : ${d.error}</div>`;
+        } else if (d.no_release) {
+            res.innerHTML = `<div class="alert alert-secondary py-2"><i class="bi bi-info-circle"></i> Aucune release publiée sur GitHub.</div>`;
+        } else if (d.up_to_date) {
+            res.innerHTML = `<div class="alert alert-success py-2"><i class="bi bi-check-circle"></i> Vous êtes à jour — <strong>v${d.current}</strong> est la dernière version.</div>`;
+        } else {
+            res.innerHTML = `
+            <div class="alert alert-info py-2">
+                <i class="bi bi-arrow-up-circle"></i>
+                Mise à jour disponible : <strong>v${d.latest}</strong>
+                (installée : v${d.current})<br>
+                <a href="${d.release_url}" target="_blank" class="alert-link">Voir les notes de release</a>
+                ${d.release_notes ? `<hr><pre class="mb-0 small" style="white-space:pre-wrap">${escHtml(d.release_notes)}</pre>` : ''}
+            </div>`;
+        }
+    } catch(e) {
+        res.innerHTML = `<div class="alert alert-danger py-2">Erreur réseau : ${e}</div>`;
+    }
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-cloud-arrow-down"></i> Vérifier les mises à jour';
+}
+
+function escHtml(s) {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// Changement de mot de passe
+document.getElementById('form-change-pw').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    const cur = document.getElementById('pw-current').value;
+    const nw  = document.getElementById('pw-new').value;
+    const cf  = document.getElementById('pw-confirm').value;
+    const msg = document.getElementById('pw-msg');
+    if (nw !== cf) { msg.innerHTML = '<div class="alert alert-danger py-1 small">Les mots de passe ne correspondent pas.</div>'; return; }
+    try {
+        const r = await fetch('/api/account/change-password', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({current_password: cur, new_password: nw})
+        });
+        const d = await r.json();
+        if (d.success) {
+            msg.innerHTML = '<div class="alert alert-success py-1 small">Mot de passe mis à jour.</div>';
+            this.reset();
+        } else {
+            msg.innerHTML = `<div class="alert alert-danger py-1 small">${d.error || 'Erreur'}</div>`;
+        }
+    } catch(e) {
+        msg.innerHTML = `<div class="alert alert-danger py-1 small">Erreur réseau.</div>`;
+    }
+});
+</script>
+{% endblock %}

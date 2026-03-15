@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+{% block title %}Creer un site - Omada API Hub{% endblock %}
+{% block content %}
+
+<div class="d-flex align-items-center mb-4">
+    <a href="{{ url_for('sites_page') }}" class="btn btn-outline-secondary me-3">
+        <i class="bi bi-arrow-left"></i>
+    </a>
+    <h2 class="mb-0"><i class="bi bi-plus-circle"></i> Creer un nouveau site</h2>
+</div>
+
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card shadow-sm">
+            <div class="card-body p-4">
+                <form id="create-site-form">
+                    <h5 class="mb-3">Informations du site</h5>
+
+                    <div class="mb-3">
+                        <label for="site-name" class="form-label">Nom du site *</label>
+                        <input type="text" class="form-control" id="site-name" required
+                               maxlength="64" placeholder="Ex: Bureau Paris">
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="site-region" class="form-label">Region *</label>
+                            <input type="text" class="form-control" id="site-region" required placeholder="Ex: France" value="France">
+                            <div class="form-text">Charge automatiquement depuis le site existant</div>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="site-timezone" class="form-label">Fuseau horaire *</label>
+                            <input type="text" class="form-control" id="site-timezone" required placeholder="Ex: Europe/Amsterdam" value="">
+                            <div class="form-text">Charge automatiquement depuis le site existant</div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="site-scenario" class="form-label">Scenario *</label>
+                            <select class="form-select" id="site-scenario" required>
+                                <option value="">Chargement...</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="site-type" class="form-label">Type</label>
+                            <select class="form-select" id="site-type">
+                                <option value="0">Basic</option>
+                                <option value="1">Pro</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <hr>
+                    <h5 class="mb-3">Compte equipement (Device Account)</h5>
+                    <p class="text-muted small">Identifiants de gestion pour les equipements du site</p>
+
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="device-username" class="form-label">Nom d'utilisateur *</label>
+                            <input type="text" class="form-control" id="device-username" required
+                                   placeholder="admin" maxlength="64">
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="device-password" class="form-label">Mot de passe *</label>
+                            <input type="password" class="form-control" id="device-password" required
+                                   placeholder="Min 10 chars, majuscules, chiffres, symboles" minlength="10" maxlength="64">
+                            <div class="form-text">10-64 caracteres : majuscules, minuscules, chiffres et symboles requis</div>
+                        </div>
+                    </div>
+
+                    <div id="create-error" class="alert alert-danger d-none"></div>
+                    <div id="create-success" class="alert alert-success d-none"></div>
+
+                    <div class="d-flex justify-content-end gap-2">
+                        <a href="{{ url_for('sites_page') }}" class="btn btn-secondary">Annuler</a>
+                        <button type="submit" class="btn btn-success" id="create-btn">
+                            <span class="spinner-border spinner-border-sm d-none" id="create-spinner"></span>
+                            <i class="bi bi-plus-lg"></i> Creer le site
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Load scenarios
+async function loadScenarios() {
+    const select = document.getElementById('site-scenario');
+    try {
+        const resp = await fetch('/api/scenarios');
+        if (resp.status === 401) { window.location.href = '/'; return; }
+        const data = await resp.json();
+        const scenarios = (data.result && data.result.data) || data.result || [];
+        select.innerHTML = '<option value="">Selectionnez un scenario</option>';
+
+        if (Array.isArray(scenarios)) {
+            scenarios.forEach(s => {
+                const name = typeof s === 'string' ? s : (s.name || s.scenario || '');
+                if (name) {
+                    const opt = document.createElement('option');
+                    opt.value = name;
+                    opt.textContent = name;
+                    select.appendChild(opt);
+                }
+            });
+        }
+    } catch (err) {
+        select.innerHTML = '<option value="Office">Office</option><option value="Home">Home</option><option value="Hotel">Hotel</option><option value="Mall">Mall</option><option value="Restaurant">Restaurant</option>';
+    }
+}
+
+// Load defaults from existing site
+async function loadSiteDefaults() {
+    try {
+        const resp = await fetch('/api/site-defaults');
+        const data = await resp.json();
+        if (data.region) document.getElementById('site-region').value = data.region;
+        if (data.timeZone) document.getElementById('site-timezone').value = data.timeZone;
+        if (data.scenario) {
+            const sel = document.getElementById('site-scenario');
+            for (const opt of sel.options) {
+                if (opt.value === data.scenario) { opt.selected = true; break; }
+            }
+        }
+    } catch(e) {}
+}
+loadSiteDefaults();
+
+document.getElementById('create-site-form').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    const btn = document.getElementById('create-btn');
+    const spinner = document.getElementById('create-spinner');
+    const errorDiv = document.getElementById('create-error');
+    const successDiv = document.getElementById('create-success');
+
+    btn.disabled = true;
+    spinner.classList.remove('d-none');
+    errorDiv.classList.add('d-none');
+    successDiv.classList.add('d-none');
+
+    const body = {
+        name: document.getElementById('site-name').value,
+        region: document.getElementById('site-region').value,
+        timeZone: document.getElementById('site-timezone').value,
+        scenario: document.getElementById('site-scenario').value,
+        type: parseInt(document.getElementById('site-type').value),
+        deviceAccountSetting: {
+            username: document.getElementById('device-username').value,
+            password: document.getElementById('device-password').value,
+        },
+    };
+
+    try {
+        const resp = await fetch('/api/sites', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(body),
+        });
+        const data = await resp.json();
+
+        if (resp.ok && (data.errorCode === 0 || data.errorCode === undefined)) {
+            successDiv.textContent = 'Site cree avec succes !';
+            successDiv.classList.remove('d-none');
+            setTimeout(() => { window.location.href = '/sites'; }, 1500);
+        } else {
+            const msg = data.msg || 'Erreur lors de la creation du site';
+            errorDiv.textContent = msg;
+            errorDiv.classList.remove('d-none');
+        }
+    } catch (err) {
+        errorDiv.textContent = 'Erreur reseau : ' + err.message;
+        errorDiv.classList.remove('d-none');
+    } finally {
+        btn.disabled = false;
+        spinner.classList.add('d-none');
+    }
+});
+
+loadScenarios();
+</script>
+{% endblock %}

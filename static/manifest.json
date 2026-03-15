@@ -1,0 +1,42 @@
+{
+  "name": "Omada API Hub",
+  "short_name": "API Hub",
+  "description": "Gestionnaire MSP Omada — contrôle et configuration réseau",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f5f7fa",
+  "theme_color": "#0d6efd",
+  "lang": "fr",
+  "icons": [
+    {
+      "src": "/static/img/icon-pwa.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/static/img/icon-pwa.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Clients",
+      "short_name": "Clients",
+      "description": "Liste des clients MSP",
+      "url": "/customers",
+      "icons": [{ "src": "/static/img/icon-pwa.svg", "sizes": "any" }]
+    },
+    {
+      "name": "Sites",
+      "short_name": "Sites",
+      "description": "Liste des sites",
+      "url": "/sites",
+      "icons": [{ "src": "/static/img/icon-pwa.svg", "sizes": "any" }]
+    }
+  ]
+}
