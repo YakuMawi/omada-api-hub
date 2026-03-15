@@ -61,9 +61,46 @@ Ou depuis l'interface : **⚙ Paramètres → Vérifier les mises à jour**.
 
 ---
 
-## Récupération d'accès (mot de passe oublié)
+## Réinitialisation du mot de passe
 
-Si vous n'arrivez plus à vous connecter, utilisez l'utilitaire CLI :
+La réinitialisation de mot de passe fonctionne en deux modes selon la configuration de l'instance.
+
+### Sans serveur SMTP configuré
+
+La vérification se fait par **email de récupération** : l'utilisateur doit saisir son nom de compte et l'adresse email renseignée lors de la création du compte. Si la combinaison correspond, il peut immédiatement définir un nouveau mot de passe.
+
+→ Accessible depuis la page de connexion : **Mot de passe oublié ?**
+
+### Avec serveur SMTP configuré
+
+Un **code à 6 chiffres** valable 15 minutes est envoyé à l'adresse email du compte. L'utilisateur doit le saisir avant de pouvoir définir un nouveau mot de passe.
+
+→ Configurer le SMTP : **⚙ Paramètres → Configuration email (SMTP)**
+
+### Configuration SMTP
+
+Dans **Paramètres → Configuration email (SMTP)**, renseignez :
+
+| Champ | Description |
+|-------|-------------|
+| Serveur SMTP | ex. `smtp.gmail.com` |
+| Port | `587` (STARTTLS) ou `465` (SSL) |
+| Utilisateur | Votre adresse email SMTP |
+| Mot de passe | Mot de passe ou App Password |
+| Expéditeur | Adresse d'envoi (facultatif) |
+| STARTTLS | Activé par défaut (recommandé) |
+
+Utilisez le bouton **"Email de test"** pour valider la configuration — l'email est envoyé à l'adresse de récupération de votre compte.
+
+### Email de récupération
+
+Renseignez votre email lors de l'inscription ou dans **⚙ Paramètres → Compte → Modifier l'email de récupération**.
+
+---
+
+## Récupération d'accès (mot de passe oublié sans email)
+
+Si vous n'avez pas d'email de récupération configuré, utilisez l'utilitaire CLI directement sur le serveur :
 
 ```bash
 python3 set_password.py
@@ -78,9 +115,10 @@ python3 set_password.py
 - **Dashboard sites** — liste des sites avec statut et métriques
 - **Détail de site** — onglets Appareils, Clients, WAN, WireGuard, Wi-Fi
 - **WAN** — détection automatique des ports WAN (En ligne / En backup / Hors ligne)
+- **Reset de mot de passe** — par email de récupération ou code SMTP
 - **Authentification sécurisée** — bcrypt, protection brute-force, CSRF, sessions
 - **PWA** — installable sur mobile depuis le navigateur (iOS/Android)
-- **Paramètres** — vérification des mises à jour GitHub, changement de mot de passe
+- **Paramètres** — SMTP, version, changement de mot de passe et email
 
 ---
 
@@ -106,6 +144,7 @@ omada-api-hub/
 - Protection **brute-force** : 5 tentatives, blocage 5 minutes
 - Tokens **CSRF** sur tous les formulaires
 - Sessions signées avec une clé secrète auto-générée
+- Codes de reset à usage unique, expiry 15 minutes
 - Fichiers sensibles exclus du dépôt : `.env`, `users.db`
 
 ---

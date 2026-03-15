@@ -72,9 +72,12 @@
                     </form>
 
                     <hr class="my-3">
-                    <div class="text-center">
+                    <div class="text-center d-flex justify-content-between px-1">
                         <a href="{{ url_for('app_register_page') }}" class="text-decoration-none small">
                             <i class="bi bi-person-plus"></i> Créer un compte
+                        </a>
+                        <a href="{{ url_for('app_forgot_password') }}" class="text-decoration-none small text-muted">
+                            <i class="bi bi-question-circle"></i> Mot de passe oublié ?
                         </a>
                     </div>
                 </div>

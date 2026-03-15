@@ -41,7 +41,7 @@ _MAX_ATTEMPTS = 5
 _LOCKOUT_SECONDS = 300  # 5 minutes
 
 # Routes publiques exemptées de la vérification app_authenticated
-_PUBLIC_ROUTES = {"app_login_page", "app_register_page", "app_logout", "static"}
+_PUBLIC_ROUTES = {"app_login_page", "app_register_page", "app_forgot_password", "app_reset_password", "app_logout", "static"}
 
 CREDENTIALS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".omada-credentials.json")
 DB_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "users.db")
@@ -88,6 +88,28 @@ def init_db():
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )
     """)
+    # New tables
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS app_settings (
+            key   TEXT PRIMARY KEY,
+            value TEXT NOT NULL DEFAULT ''
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS password_resets (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id    INTEGER NOT NULL,
+            code       TEXT NOT NULL,
+            expires_at REAL NOT NULL,
+            used       INTEGER DEFAULT 0,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+    """)
+    # Add email column to users if missing (safe on existing DBs)
+    try:
+        conn.execute("ALTER TABLE users ADD COLUMN email TEXT DEFAULT ''")
+    except Exception:
+        pass
     conn.commit()
     # Auto-migrate: if no users exist and env vars are set, create admin + import profiles
     if conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0:
@@ -122,6 +144,62 @@ def init_db():
             except Exception:
                 pass
     conn.close()
+
+
+# ---------------------------------------------------------------------------
+# SMTP helpers
+# ---------------------------------------------------------------------------
+
+def get_smtp_config():
+    """Return SMTP config dict from app_settings, or {} if not configured."""
+    try:
+        rows = get_db().execute("SELECT key, value FROM app_settings").fetchall()
+        return {r[0]: r[1] for r in rows}
+    except Exception:
+        return {}
+
+
+def smtp_is_configured():
+    cfg = get_smtp_config()
+    return bool(cfg.get("smtp_host") and cfg.get("smtp_user"))
+
+
+def send_reset_email(to_email, code):
+    """Send a password-reset code by email. Returns True on success."""
+    import smtplib
+    from email.mime.text import MIMEText
+    cfg = get_smtp_config()
+    host     = cfg.get("smtp_host", "")
+    port     = int(cfg.get("smtp_port", 587))
+    user     = cfg.get("smtp_user", "")
+    password = cfg.get("smtp_password", "")
+    from_addr = cfg.get("smtp_from") or user
+    use_tls  = cfg.get("smtp_tls", "1") not in ("0", "false", "False", "")
+    body = (
+        f"Bonjour,\n\n"
+        f"Votre code de réinitialisation de mot de passe est :\n\n"
+        f"    {code}\n\n"
+        f"Ce code est valable 15 minutes.\n\n"
+        f"Si vous n'avez pas demandé ce code, ignorez cet email.\n\n"
+        f"— Omada API Hub"
+    )
+    msg = MIMEText(body, "plain", "utf-8")
+    msg["Subject"] = "Réinitialisation de mot de passe — Omada API Hub"
+    msg["From"]    = from_addr
+    msg["To"]      = to_email
+    try:
+        if port == 465:
+            srv = smtplib.SMTP_SSL(host, port, timeout=10)
+        else:
+            srv = smtplib.SMTP(host, port, timeout=10)
+            if use_tls:
+                srv.starttls()
+        srv.login(user, password)
+        srv.sendmail(from_addr, [to_email], msg.as_string())
+        srv.quit()
+        return True
+    except Exception:
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -635,6 +713,7 @@ def app_register_page():
             username = request.form.get("username", "").strip()
             password = request.form.get("password", "")
             confirm  = request.form.get("confirm_password", "")
+            email    = request.form.get("email", "").strip().lower()
             if not username or not password:
                 error = "Nom d'utilisateur et mot de passe requis."
             elif len(username) < 3:
@@ -643,13 +722,15 @@ def app_register_page():
                 error = "Mot de passe trop court (8 caractères minimum)."
             elif password != confirm:
                 error = "Les mots de passe ne correspondent pas."
+            elif email and "@" not in email:
+                error = "Adresse email invalide."
             else:
                 pw_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
                 try:
                     db = sqlite3.connect(DB_FILE)
                     db.execute(
-                        "INSERT INTO users (username, password_hash) VALUES (?, ?)",
-                        (username, pw_hash),
+                        "INSERT INTO users (username, password_hash, email) VALUES (?, ?, ?)",
+                        (username, pw_hash, email),
                     )
                     db.commit()
                     db.close()
@@ -661,6 +742,151 @@ def app_register_page():
         "register.html",
         error=error,
         success=success,
+        csrf_token=session["csrf_token"],
+    )
+
+
+# ---------------------------------------------------------------------------
+# Password reset
+# ---------------------------------------------------------------------------
+
+@app.route("/forgot-password", methods=["GET", "POST"])
+def app_forgot_password():
+    if session.get("app_authenticated"):
+        return redirect(url_for("login_page"))
+    if "csrf_token" not in session:
+        session["csrf_token"] = secrets.token_hex(32)
+
+    error = None
+    info  = None
+
+    if request.method == "POST":
+        ip = _get_client_ip()
+        if _is_locked_out(ip):
+            error = "Trop de tentatives. Réessayez dans 5 minutes."
+        else:
+            token_form    = request.form.get("csrf_token", "")
+            token_session = session.get("csrf_token", "")
+            if not token_form or not token_session or not secrets.compare_digest(token_form, token_session):
+                error = "Requête invalide. Veuillez réessayer."
+            else:
+                username = request.form.get("username", "").strip()
+                email    = request.form.get("email", "").strip().lower()
+                db = sqlite3.connect(DB_FILE)
+                row = db.execute(
+                    "SELECT id, email FROM users WHERE username=?", (username,)
+                ).fetchone()
+                db.close()
+                match = row and row[1] and row[1].lower() == email
+
+                if match:
+                    _clear_attempts(ip)
+                    if smtp_is_configured():
+                        # Generate 6-digit code, store in DB, send by email
+                        code = f"{secrets.randbelow(1_000_000):06d}"
+                        expires = time.time() + 900
+                        db2 = sqlite3.connect(DB_FILE)
+                        db2.execute("DELETE FROM password_resets WHERE user_id=?", (row[0],))
+                        db2.execute(
+                            "INSERT INTO password_resets (user_id, code, expires_at) VALUES (?,?,?)",
+                            (row[0], code, expires),
+                        )
+                        db2.commit()
+                        db2.close()
+                        send_reset_email(email, code)
+                        session["reset_uid"]  = row[0]
+                        session["reset_smtp"] = True
+                    else:
+                        session["reset_uid"]  = row[0]
+                        session["reset_smtp"] = False
+                    return redirect(url_for("app_reset_password"))
+                else:
+                    _record_attempt(ip)
+                    # Neutral message to avoid account enumeration
+                    info = "Si ce compte existe et que l'email correspond, vous pouvez réinitialiser votre mot de passe."
+
+    return render_template(
+        "forgot_password.html",
+        error=error,
+        info=info,
+        csrf_token=session["csrf_token"],
+        smtp_active=smtp_is_configured(),
+    )
+
+
+@app.route("/reset-password", methods=["GET", "POST"])
+def app_reset_password():
+    if session.get("app_authenticated"):
+        return redirect(url_for("login_page"))
+    if "reset_uid" not in session:
+        return redirect(url_for("app_forgot_password"))
+    if "csrf_token" not in session:
+        session["csrf_token"] = secrets.token_hex(32)
+
+    uid       = session["reset_uid"]
+    use_smtp  = session.get("reset_smtp", False)
+    code_ok   = session.get("reset_code_ok", False)
+    error     = None
+
+    # Step A (SMTP only): verify code
+    if use_smtp and not code_ok and request.method == "POST":
+        token_form    = request.form.get("csrf_token", "")
+        token_session = session.get("csrf_token", "")
+        if not token_form or not secrets.compare_digest(token_form, token_session):
+            error = "Requête invalide."
+        else:
+            submitted_code = request.form.get("code", "").strip()
+            db = sqlite3.connect(DB_FILE)
+            row = db.execute(
+                "SELECT id FROM password_resets WHERE user_id=? AND code=? AND used=0",
+                (uid, submitted_code),
+            ).fetchone()
+            if row:
+                expires = db.execute(
+                    "SELECT expires_at FROM password_resets WHERE id=?", (row[0],)
+                ).fetchone()
+                db.close()
+                if expires and time.time() < expires[0]:
+                    session["reset_code_ok"] = True
+                    code_ok = True
+                else:
+                    error = "Ce code a expiré. Recommencez depuis le début."
+                    session.pop("reset_uid", None)
+                    session.pop("reset_smtp", None)
+            else:
+                db.close()
+                error = "Code incorrect."
+
+    # Step B: set new password
+    elif (not use_smtp or code_ok) and request.method == "POST" and request.form.get("new_password"):
+        token_form    = request.form.get("csrf_token", "")
+        token_session = session.get("csrf_token", "")
+        if not token_form or not secrets.compare_digest(token_form, token_session):
+            error = "Requête invalide."
+        else:
+            new_pw  = request.form.get("new_password", "")
+            confirm = request.form.get("confirm_password", "")
+            if len(new_pw) < 8:
+                error = "Mot de passe trop court (8 caractères minimum)."
+            elif new_pw != confirm:
+                error = "Les mots de passe ne correspondent pas."
+            else:
+                new_hash = bcrypt.hashpw(new_pw.encode(), bcrypt.gensalt()).decode()
+                db = sqlite3.connect(DB_FILE)
+                db.execute("UPDATE users SET password_hash=? WHERE id=?", (new_hash, uid))
+                db.execute("DELETE FROM password_resets WHERE user_id=?", (uid,))
+                db.commit()
+                db.close()
+                session.pop("reset_uid", None)
+                session.pop("reset_smtp", None)
+                session.pop("reset_code_ok", None)
+                return redirect(url_for("app_login_page"))
+
+    return render_template(
+        "reset_password.html",
+        error=error,
+        use_smtp=use_smtp,
+        code_ok=code_ok,
         csrf_token=session["csrf_token"],
     )
 
@@ -2152,6 +2378,65 @@ def api_change_password():
         return jsonify({"error": "Erreur de vérification"}), 500
     new_hash = bcrypt.hashpw(new_pw.encode(), bcrypt.gensalt()).decode()
     db.execute("UPDATE users SET password_hash=? WHERE id=?", (new_hash, uid))
+    db.commit()
+    return jsonify({"success": True})
+
+
+@app.route("/api/settings/smtp", methods=["GET"])
+@require_app_login
+def api_get_smtp():
+    cfg = get_smtp_config()
+    if cfg.get("smtp_password"):
+        cfg["smtp_password"] = "***"
+    return jsonify(cfg)
+
+
+@app.route("/api/settings/smtp", methods=["POST"])
+@require_app_login
+def api_save_smtp():
+    body = request.get_json(silent=True) or {}
+    keys = ["smtp_host", "smtp_port", "smtp_user", "smtp_password", "smtp_from", "smtp_tls"]
+    db = get_db()
+    for k in keys:
+        if k in body:
+            val = body[k]
+            # Don't overwrite password if placeholder sent
+            if k == "smtp_password" and val == "***":
+                continue
+            db.execute(
+                "INSERT INTO app_settings (key, value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (k, str(val)),
+            )
+    db.commit()
+    return jsonify({"success": True})
+
+
+@app.route("/api/settings/smtp/test", methods=["POST"])
+@require_app_login
+def api_test_smtp():
+    uid = session.get("user_id")
+    db  = get_db()
+    row = db.execute("SELECT email FROM users WHERE id=?", (uid,)).fetchone()
+    to_email = row[0] if row and row[0] else None
+    if not to_email:
+        return jsonify({"error": "Aucune adresse email associée à votre compte. Ajoutez-en une dans les paramètres."}), 400
+    if not smtp_is_configured():
+        return jsonify({"error": "SMTP non configuré."}), 400
+    ok = send_reset_email(to_email, "TEST-EMAIL")
+    if ok:
+        return jsonify({"success": True, "sent_to": to_email})
+    return jsonify({"error": "Échec de l'envoi. Vérifiez la configuration SMTP."}), 502
+
+
+@app.route("/api/account/email", methods=["POST"])
+@require_app_login
+def api_update_email():
+    body  = request.get_json(silent=True) or {}
+    email = body.get("email", "").strip().lower()
+    if email and "@" not in email:
+        return jsonify({"error": "Adresse email invalide"}), 400
+    db = get_db()
+    db.execute("UPDATE users SET email=? WHERE id=?", (email, session.get("user_id")))
     db.commit()
     return jsonify({"success": True})
 

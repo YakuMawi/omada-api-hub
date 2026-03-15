@@ -43,9 +43,14 @@
     </div>
     <div class="card-body">
         <p class="mb-3">Connecté en tant que <strong>{{ app_username }}</strong></p>
-        <button class="btn btn-outline-warning btn-sm" data-bs-toggle="collapse" data-bs-target="#change-pw-form">
-            <i class="bi bi-key"></i> Changer le mot de passe
-        </button>
+        <div class="d-flex gap-2 flex-wrap">
+            <button class="btn btn-outline-warning btn-sm" data-bs-toggle="collapse" data-bs-target="#change-pw-form">
+                <i class="bi bi-key"></i> Changer le mot de passe
+            </button>
+            <button class="btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" data-bs-target="#change-email-form">
+                <i class="bi bi-envelope"></i> Modifier l'email de récupération
+            </button>
+        </div>
         <div id="change-pw-form" class="collapse mt-3">
             <form id="form-change-pw" class="row g-2" style="max-width:380px">
                 <div class="col-12">
@@ -68,6 +73,71 @@
                 <div id="pw-msg" class="col-12"></div>
             </form>
         </div>
+        <div id="change-email-form" class="collapse mt-3">
+            <form id="form-change-email" class="row g-2" style="max-width:380px">
+                <div class="col-12">
+                    <input type="email" class="form-control form-control-sm" id="email-new"
+                           placeholder="nouvelle@adresse.com">
+                    <div class="form-text">Utilisé pour réinitialiser votre mot de passe.</div>
+                </div>
+                <div class="col-12">
+                    <button type="submit" class="btn btn-secondary btn-sm">
+                        <i class="bi bi-check-lg"></i> Enregistrer
+                    </button>
+                </div>
+                <div id="email-msg" class="col-12"></div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Configuration SMTP -->
+<div class="card mb-4">
+    <div class="card-header fw-semibold d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-envelope-at"></i> Configuration email (SMTP)</span>
+        <span id="smtp-badge" class="badge bg-secondary">Chargement…</span>
+    </div>
+    <div class="card-body">
+        <p class="text-muted small mb-3">
+            Si configuré, un code de vérification sera envoyé par email lors d'un reset de mot de passe.
+            Sinon, le reset se fait par vérification de l'email de récupération directement.
+        </p>
+        <form id="form-smtp" class="row g-2" style="max-width:480px">
+            <div class="col-8">
+                <input type="text" class="form-control form-control-sm" id="smtp-host" placeholder="smtp.example.com">
+                <div class="form-text">Serveur SMTP</div>
+            </div>
+            <div class="col-4">
+                <input type="number" class="form-control form-control-sm" id="smtp-port" placeholder="587" value="587">
+                <div class="form-text">Port</div>
+            </div>
+            <div class="col-12">
+                <input type="text" class="form-control form-control-sm" id="smtp-user" placeholder="user@example.com">
+                <div class="form-text">Utilisateur SMTP</div>
+            </div>
+            <div class="col-12">
+                <input type="password" class="form-control form-control-sm" id="smtp-password" placeholder="Mot de passe SMTP">
+            </div>
+            <div class="col-12">
+                <input type="email" class="form-control form-control-sm" id="smtp-from" placeholder="noreply@example.com">
+                <div class="form-text">Adresse expéditeur (optionnel, utilise le compte SMTP par défaut)</div>
+            </div>
+            <div class="col-12">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="smtp-tls" checked>
+                    <label class="form-check-label small" for="smtp-tls">Utiliser STARTTLS (recommandé)</label>
+                </div>
+            </div>
+            <div class="col-12 d-flex gap-2 mt-1">
+                <button type="submit" class="btn btn-primary btn-sm">
+                    <i class="bi bi-floppy"></i> Enregistrer
+                </button>
+                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="testSmtp()">
+                    <i class="bi bi-send"></i> Email de test
+                </button>
+            </div>
+            <div id="smtp-msg" class="col-12"></div>
+        </form>
     </div>
 </div>
 
@@ -133,20 +203,82 @@ document.getElementById('form-change-pw').addEventListener('submit', async funct
     if (nw !== cf) { msg.innerHTML = '<div class="alert alert-danger py-1 small">Les mots de passe ne correspondent pas.</div>'; return; }
     try {
         const r = await fetch('/api/account/change-password', {
-            method: 'POST',
-            headers: {'Content-Type':'application/json'},
+            method: 'POST', headers: {'Content-Type':'application/json'},
             body: JSON.stringify({current_password: cur, new_password: nw})
         });
         const d = await r.json();
-        if (d.success) {
-            msg.innerHTML = '<div class="alert alert-success py-1 small">Mot de passe mis à jour.</div>';
-            this.reset();
-        } else {
-            msg.innerHTML = `<div class="alert alert-danger py-1 small">${d.error || 'Erreur'}</div>`;
-        }
-    } catch(e) {
-        msg.innerHTML = `<div class="alert alert-danger py-1 small">Erreur réseau.</div>`;
-    }
+        if (d.success) { msg.innerHTML = '<div class="alert alert-success py-1 small">Mot de passe mis à jour.</div>'; this.reset(); }
+        else { msg.innerHTML = `<div class="alert alert-danger py-1 small">${d.error || 'Erreur'}</div>`; }
+    } catch(e) { msg.innerHTML = `<div class="alert alert-danger py-1 small">Erreur réseau.</div>`; }
 });
+
+// Modification email
+document.getElementById('form-change-email').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    const email = document.getElementById('email-new').value;
+    const msg   = document.getElementById('email-msg');
+    try {
+        const r = await fetch('/api/account/email', {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({email})
+        });
+        const d = await r.json();
+        if (d.success) { msg.innerHTML = '<div class="alert alert-success py-1 small">Email mis à jour.</div>'; this.reset(); }
+        else { msg.innerHTML = `<div class="alert alert-danger py-1 small">${d.error || 'Erreur'}</div>`; }
+    } catch(e) { msg.innerHTML = `<div class="alert alert-danger py-1 small">Erreur réseau.</div>`; }
+});
+
+// Chargement config SMTP
+async function loadSmtp() {
+    try {
+        const r = await fetch('/api/settings/smtp');
+        const d = await r.json();
+        document.getElementById('smtp-host').value     = d.smtp_host || '';
+        document.getElementById('smtp-port').value     = d.smtp_port || '587';
+        document.getElementById('smtp-user').value     = d.smtp_user || '';
+        document.getElementById('smtp-from').value     = d.smtp_from || '';
+        document.getElementById('smtp-tls').checked    = (d.smtp_tls || '1') !== '0';
+        if (d.smtp_password) document.getElementById('smtp-password').placeholder = '••••••••';
+        const configured = !!(d.smtp_host && d.smtp_user);
+        const badge = document.getElementById('smtp-badge');
+        badge.className = configured ? 'badge bg-success' : 'badge bg-secondary';
+        badge.textContent = configured ? 'Configuré' : 'Non configuré';
+    } catch(e) {}
+}
+loadSmtp();
+
+// Sauvegarde SMTP
+document.getElementById('form-smtp').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    const msg = document.getElementById('smtp-msg');
+    const payload = {
+        smtp_host:     document.getElementById('smtp-host').value.trim(),
+        smtp_port:     document.getElementById('smtp-port').value,
+        smtp_user:     document.getElementById('smtp-user').value.trim(),
+        smtp_password: document.getElementById('smtp-password').value,
+        smtp_from:     document.getElementById('smtp-from').value.trim(),
+        smtp_tls:      document.getElementById('smtp-tls').checked ? '1' : '0',
+    };
+    try {
+        const r = await fetch('/api/settings/smtp', {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify(payload)
+        });
+        const d = await r.json();
+        if (d.success) { msg.innerHTML = '<div class="alert alert-success py-1 small">Configuration SMTP enregistrée.</div>'; loadSmtp(); }
+        else { msg.innerHTML = `<div class="alert alert-danger py-1 small">${d.error || 'Erreur'}</div>`; }
+    } catch(e) { msg.innerHTML = `<div class="alert alert-danger py-1 small">Erreur réseau.</div>`; }
+});
+
+async function testSmtp() {
+    const msg = document.getElementById('smtp-msg');
+    msg.innerHTML = '<div class="alert alert-secondary py-1 small"><span class="spinner-border spinner-border-sm"></span> Envoi…</div>';
+    try {
+        const r = await fetch('/api/settings/smtp/test', {method: 'POST'});
+        const d = await r.json();
+        if (d.success) { msg.innerHTML = `<div class="alert alert-success py-1 small">Email de test envoyé à <strong>${d.sent_to}</strong>.</div>`; }
+        else { msg.innerHTML = `<div class="alert alert-danger py-1 small">${d.error || 'Erreur'}</div>`; }
+    } catch(e) { msg.innerHTML = `<div class="alert alert-danger py-1 small">Erreur réseau.</div>`; }
+}
 </script>
 {% endblock %}
