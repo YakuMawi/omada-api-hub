@@ -2441,6 +2441,42 @@ def api_update_email():
     return jsonify({"success": True})
 
 
+@app.route("/api/update", methods=["POST"])
+@require_app_login
+def api_do_update():
+    """Pull latest code from GitHub then restart the process."""
+    import subprocess, threading
+    app_dir = os.path.dirname(os.path.abspath(__file__))
+    try:
+        pull = subprocess.run(
+            ["git", "pull", "origin", "main"],
+            cwd=app_dir, capture_output=True, text=True, timeout=30
+        )
+        output = (pull.stdout + pull.stderr).strip()
+        if pull.returncode != 0:
+            return jsonify({"success": False, "output": output}), 500
+
+        # Install/upgrade packages (handles externally-managed envs)
+        subprocess.run(
+            ["pip3", "install", "--break-system-packages", "-q", "-r",
+             os.path.join(app_dir, "requirements.txt")],
+            capture_output=True, timeout=60
+        )
+
+        new_version = open(os.path.join(app_dir, "VERSION")).read().strip()
+
+        # Restart the process after 1.5 s (gives time to send the response)
+        def _restart():
+            import time as _t, sys as _s
+            _t.sleep(1.5)
+            os.execv(_s.executable, [_s.executable] + _s.argv)
+
+        threading.Thread(target=_restart, daemon=True).start()
+        return jsonify({"success": True, "output": output, "new_version": new_version})
+    except Exception as e:
+        return jsonify({"success": False, "output": str(e)}), 500
+
+
 @app.route("/api/version/check", methods=["GET"])
 @require_app_login
 def api_version_check():

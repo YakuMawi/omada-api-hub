@@ -5,7 +5,8 @@ cd "$(dirname "$0")"
 # ── 1. Dépendances Python ────────────────────────────────────────────────────
 if ! python3 -c "import flask, bcrypt, requests, dotenv" 2>/dev/null; then
     echo "→ Installation des dépendances…"
-    pip3 install -r requirements.txt -q
+    pip3 install -r requirements.txt -q 2>/dev/null \
+        || pip3 install --break-system-packages -r requirements.txt -q
 fi
 
 # ── 2. Configuration (.env) ──────────────────────────────────────────────────

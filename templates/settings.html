@@ -180,13 +180,43 @@ async function checkUpdate() {
                 (installée : v${d.current})<br>
                 <a href="${d.release_url}" target="_blank" class="alert-link">Voir les notes de release</a>
                 ${d.release_notes ? `<hr><pre class="mb-0 small" style="white-space:pre-wrap">${escHtml(d.release_notes)}</pre>` : ''}
-            </div>`;
+            </div>
+            <button class="btn btn-success" onclick="doUpdate()">
+                <i class="bi bi-download"></i> Mettre à jour vers v${d.latest}
+            </button>
+            <div id="update-progress" class="mt-2"></div>`;
         }
     } catch(e) {
         res.innerHTML = `<div class="alert alert-danger py-2">Erreur réseau : ${e}</div>`;
     }
     btn.disabled = false;
     btn.innerHTML = '<i class="bi bi-cloud-arrow-down"></i> Vérifier les mises à jour';
+}
+
+async function doUpdate() {
+    const prog = document.getElementById('update-progress');
+    prog.innerHTML = '<div class="alert alert-secondary py-2"><span class="spinner-border spinner-border-sm"></span> Mise à jour en cours, veuillez patienter…</div>';
+    document.querySelector('[onclick="doUpdate()"]').disabled = true;
+    try {
+        const r = await fetch('/api/update', {method: 'POST'});
+        const d = await r.json();
+        if (d.success) {
+            prog.innerHTML = `<div class="alert alert-success py-2">
+                <i class="bi bi-check-circle"></i> Mise à jour réussie vers <strong>v${d.new_version}</strong> — application redémarrée.<br>
+                <small class="text-muted">${escHtml(d.output)}</small>
+            </div>
+            <div class="alert alert-warning py-2 mt-2">
+                <i class="bi bi-arrow-clockwise"></i> <strong>Rechargez la page</strong> dans quelques secondes.
+            </div>`;
+            setTimeout(() => location.reload(), 4000);
+        } else {
+            prog.innerHTML = `<div class="alert alert-danger py-2"><i class="bi bi-x-circle"></i> Échec : <pre class="mb-0 small">${escHtml(d.output)}</pre></div>`;
+            document.querySelector('[onclick="doUpdate()"]').disabled = false;
+        }
+    } catch(e) {
+        prog.innerHTML = `<div class="alert alert-danger py-2">Erreur réseau : ${e}</div>`;
+        document.querySelector('[onclick="doUpdate()"]').disabled = false;
+    }
 }
 
 function escHtml(s) {
