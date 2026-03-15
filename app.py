@@ -2494,7 +2494,12 @@ def api_version_check():
         latest = data.get("tag_name", "").lstrip("v")
         html_url = data.get("html_url", "")
         body = data.get("body", "")
-        up_to_date = (latest == current)
+        def _ver(v):
+            try:
+                return tuple(int(x) for x in v.split("."))
+            except Exception:
+                return (0,)
+        up_to_date = _ver(current) >= _ver(latest)
         return jsonify({
             "current": current,
             "latest": latest,
