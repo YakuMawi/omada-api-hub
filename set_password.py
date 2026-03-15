@@ -1,83 +1,65 @@
 #!/usr/bin/env python3
-"""Script de configuration du mot de passe d'accès à Omada API Hub.
+"""Utilitaire CLI — créer ou réinitialiser un compte utilisateur.
+
+Utile si vous êtes bloqué et ne pouvez plus vous connecter via l'interface web.
 
 Usage :
     python3 set_password.py
 """
 import getpass
 import os
-import re
+import sqlite3
 import sys
 
 try:
     import bcrypt
 except ImportError:
-    sys.exit("Erreur : bcrypt n'est pas installé. Lancez : pip install bcrypt")
+    sys.exit("Erreur : bcrypt n'est pas installé. Lancez : pip3 install bcrypt")
 
-ENV_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
-
-
-def read_env():
-    if not os.path.exists(ENV_FILE):
-        return {}
-    data = {}
-    with open(ENV_FILE, "r") as f:
-        for line in f:
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                key, _, value = line.partition("=")
-                data[key.strip()] = value.strip()
-    return data
-
-
-def update_env(key, value):
-    """Met à jour ou ajoute une clé dans .env."""
-    if not os.path.exists(ENV_FILE):
-        with open(ENV_FILE, "w") as f:
-            f.write(f"{key}={value}\n")
-        return
-
-    with open(ENV_FILE, "r") as f:
-        content = f.read()
-
-    pattern = re.compile(rf"^{re.escape(key)}=.*$", re.MULTILINE)
-    if pattern.search(content):
-        content = pattern.sub(f"{key}={value}", content)
-    else:
-        content += f"\n{key}={value}\n"
-
-    with open(ENV_FILE, "w") as f:
-        f.write(content)
+DB_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "users.db")
 
 
 def main():
-    print("=== Configuration du mot de passe Omada API Hub ===\n")
+    if not os.path.exists(DB_FILE):
+        sys.exit(f"Base de données introuvable : {DB_FILE}\nLancez l'application au moins une fois avant d'utiliser cet outil.")
 
-    env = read_env()
-    current_user = env.get("APP_USERNAME", "admin")
+    db = sqlite3.connect(DB_FILE)
+    users = db.execute("SELECT id, username FROM users ORDER BY id").fetchall()
 
-    username = input(f"Nom d'utilisateur [{current_user}] : ").strip()
+    print("=== Omada API Hub — Gestion des comptes ===\n")
+    if users:
+        print("Comptes existants :")
+        for u in users:
+            print(f"  [{u[0]}] {u[1]}")
+    else:
+        print("Aucun compte existant.")
+    print()
+
+    username = input("Nom d'utilisateur (nouveau ou existant) : ").strip()
     if not username:
-        username = current_user
+        sys.exit("Annulé.")
 
     while True:
         password = getpass.getpass("Nouveau mot de passe : ")
         if len(password) < 8:
             print("Le mot de passe doit contenir au moins 8 caractères.")
             continue
-        confirm = getpass.getpass("Confirmer le mot de passe : ")
+        confirm = getpass.getpass("Confirmer : ")
         if password != confirm:
             print("Les mots de passe ne correspondent pas.\n")
             continue
         break
 
-    hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
-
-    update_env("APP_USERNAME", username)
-    update_env("APP_PASSWORD_HASH", hashed)
-
-    print(f"\nMot de passe configuré pour l'utilisateur '{username}'.")
-    print("Redémarrez l'application pour appliquer les changements.")
+    pw_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+    existing = db.execute("SELECT id FROM users WHERE username=?", (username,)).fetchone()
+    if existing:
+        db.execute("UPDATE users SET password_hash=? WHERE username=?", (pw_hash, username))
+        print(f"\nMot de passe mis à jour pour « {username} ».")
+    else:
+        db.execute("INSERT INTO users (username, password_hash) VALUES (?, ?)", (username, pw_hash))
+        print(f"\nCompte « {username} » créé.")
+    db.commit()
+    db.close()
 
 
 if __name__ == "__main__":
