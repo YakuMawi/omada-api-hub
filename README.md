@@ -25,7 +25,22 @@ cd omada-api-hub
 
 C'est tout. Le script installe automatiquement les dépendances et génère la configuration au premier lancement.
 
-Ouvrez ensuite **http://\<votre-ip\>:5000** dans votre navigateur, créez votre compte et ajoutez vos contrôleurs Omada.
+Ouvrez ensuite **https://\<votre-ip\>** dans votre navigateur (port 443 HTTPS), créez votre compte et ajoutez vos contrôleurs Omada.
+
+> Le certificat est auto-signé : acceptez l'avertissement du navigateur au premier accès.
+
+---
+
+## HTTPS
+
+L'application démarre en **HTTPS sur le port 443** grâce à un certificat auto-signé généré automatiquement dans `ssl/` au premier lancement.
+
+```bash
+# Autoriser Python à écouter sur le port 443 sans root (une seule fois)
+sudo setcap 'cap_net_bind_service=+ep' $(which python3)
+```
+
+Le certificat est valable 10 ans. Aucune configuration supplémentaire n'est nécessaire.
 
 ---
 
@@ -121,6 +136,7 @@ python3 set_password.py
 - **Navbar épurée** — deux actions de déconnexion distinctes : changer de contrôleur Omada ou quitter l'API Hub
 - **Reset de mot de passe** — par email de récupération ou code SMTP à 6 chiffres
 - **Mise à jour depuis l'interface** — Paramètres → Version & Mises à jour
+- **HTTPS natif** — certificat auto-signé, port 443, tout le trafic chiffré
 - **Authentification sécurisée** — bcrypt, protection brute-force, CSRF, sessions
 - **PWA** — installable sur mobile depuis le navigateur (iOS/Android)
 - **Paramètres** — Apparence, SMTP, version, changement de mot de passe et email
@@ -137,6 +153,9 @@ omada-api-hub/
 ├── set_password.py         # Récupération d'accès en ligne de commande
 ├── requirements.txt
 ├── VERSION
+├── ssl/                    # Certificat auto-signé (généré au premier lancement)
+│   ├── cert.pem
+│   └── key.pem
 ├── static/                 # CSS, JS, images, PWA
 └── templates/              # Pages HTML
 ```
@@ -145,12 +164,13 @@ omada-api-hub/
 
 ## Sécurité
 
+- **HTTPS natif** — certificat auto-signé, tout le trafic chiffré, port 443
 - Mots de passe hachés avec **bcrypt**
 - Protection **brute-force** : 5 tentatives, blocage 5 minutes
 - Tokens **CSRF** sur tous les formulaires
 - Sessions signées avec une clé secrète auto-générée
 - Codes de reset à usage unique, expiry 15 minutes
-- Fichiers sensibles exclus du dépôt : `.env`, `users.db`
+- Fichiers sensibles exclus du dépôt : `.env`, `users.db`, `ssl/`
 
 ---
 

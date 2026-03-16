@@ -26,7 +26,6 @@ from flask import (
     session,
     url_for,
 )
-
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY") or secrets.token_hex(32)
 app.permanent_session_lifetime = timedelta(
@@ -2532,4 +2531,13 @@ def close_db(e=None):
 init_db()
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    import ssl as _ssl
+    _base = os.path.dirname(os.path.abspath(__file__))
+    _cert = os.path.join(_base, "ssl", "cert.pem")
+    _key  = os.path.join(_base, "ssl", "key.pem")
+    if os.path.exists(_cert) and os.path.exists(_key):
+        ctx = _ssl.SSLContext(_ssl.PROTOCOL_TLS_SERVER)
+        ctx.load_cert_chain(_cert, _key)
+        app.run(host="0.0.0.0", port=443, ssl_context=ctx, debug=False)
+    else:
+        app.run(host="0.0.0.0", port=5000, debug=False)

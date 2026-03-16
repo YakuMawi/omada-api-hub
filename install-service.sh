@@ -16,6 +16,9 @@ fi
 # Install deps
 python3 -c "import flask, bcrypt, requests, dotenv" 2>/dev/null || pip3 install -r "$DIR/requirements.txt" -q
 
+# Autoriser python3 à écouter sur le port 443 (privileged port)
+sudo setcap 'cap_net_bind_service=+ep' "$(which python3)"
+
 # Fichier service
 cat > /tmp/${SVC}.service << UNIT
 [Unit]
@@ -30,6 +33,8 @@ ExecStart=/usr/bin/python3 ${DIR}/app.py
 Restart=on-failure
 RestartSec=5
 EnvironmentFile=${DIR}/.env
+# Autorise l'accès au port 443 sans root
+AmbientCapabilities=CAP_NET_BIND_SERVICE
 
 [Install]
 WantedBy=multi-user.target
