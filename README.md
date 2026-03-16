@@ -37,7 +37,8 @@ L'application démarre en **HTTPS sur le port 443** grâce à un certificat auto
 
 ```bash
 # Autoriser Python à écouter sur le port 443 sans root (une seule fois)
-sudo setcap 'cap_net_bind_service=+ep' $(which python3)
+# Cibler le binaire réel et non le symlink
+sudo setcap 'cap_net_bind_service=+ep' $(readlink -f $(which python3))
 ```
 
 Le certificat est valable 10 ans. Aucune configuration supplémentaire n'est nécessaire.

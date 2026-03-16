@@ -13,11 +13,14 @@ if [ ! -f "$DIR/.env" ]; then
     echo "→ Configuration créée (.env)"
 fi
 
-# Install deps
-python3 -c "import flask, bcrypt, requests, dotenv" 2>/dev/null || pip3 install -r "$DIR/requirements.txt" -q
+# Install deps (en tant qu'utilisateur courant, sans root)
+python3 -c "import flask, bcrypt, requests, dotenv" 2>/dev/null \
+    || pip3 install --user -r "$DIR/requirements.txt" -q 2>/dev/null \
+    || pip3 install --user --break-system-packages -r "$DIR/requirements.txt" -q
 
-# Autoriser python3 à écouter sur le port 443 (privileged port)
-sudo setcap 'cap_net_bind_service=+ep' "$(which python3)"
+# Autoriser python3 à écouter sur le port 443 (cibler le binaire réel, pas le symlink)
+PYTHON_BIN=$(readlink -f "$(which python3)")
+sudo setcap 'cap_net_bind_service=+ep' "$PYTHON_BIN"
 
 # Fichier service
 cat > /tmp/${SVC}.service << UNIT
