@@ -4,15 +4,24 @@
 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h2><i class="bi bi-building"></i> Sites</h2>
-    <div class="d-flex gap-2">
+    <div class="d-flex gap-2 flex-wrap">
+        <button class="btn btn-outline-secondary" id="bulk-forget-btn" onclick="showBulkForgetModal()" disabled>
+            <i class="bi bi-slash-circle"></i> Forget (<span id="bulk-forget-count">0</span>)
+        </button>
         <button class="btn btn-outline-secondary" id="bulk-delete-btn" onclick="showBulkDeleteModal()" disabled>
             <i class="bi bi-trash"></i> Supprimer (<span id="bulk-delete-count">0</span>)
         </button>
-        {% if is_customer_mode %}
+        {% if is_direct_site_mode %}
+        <button class="btn btn-outline-primary" onclick="showAdoptModal()">
+            <i class="bi bi-file-earmark-arrow-up"></i> Adopter devices
+        </button>
         <button class="btn btn-outline-success" onclick="showBulkCreateModal()">
             <i class="bi bi-layers"></i> Creation en masse
         </button>
         {% endif %}
+        <button class="btn btn-outline-info" onclick="showExportModal()">
+            <i class="bi bi-file-earmark-arrow-down"></i> Exporter devices
+        </button>
         <a href="{{ url_for('create_site_page') }}" class="btn btn-success">
             <i class="bi bi-plus-lg"></i> Creer un site
         </a>
@@ -37,7 +46,7 @@
             <tr>
                 <th style="width:40px"><input type="checkbox" class="form-check-input" id="select-all-sites" onchange="toggleSelectAll(this)"></th>
                 <th>Nom</th>
-                {% if not is_customer_mode %}<th>Client</th>{% endif %}
+                {% if profile_mode == 'msp' %}<th>Client</th>{% endif %}
                 <th>Region</th>
                 <th>Type</th>
                 <th>Equipements</th>
@@ -48,7 +57,7 @@
     </table>
 </div>
 
-<!-- Delete modal -->
+<!-- ═══ Modal : supprimer un site ══════════════════════════════════════════ -->
 <div class="modal fade" id="deleteModal" tabindex="-1">
     <div class="modal-dialog">
         <div class="modal-content">
@@ -81,7 +90,76 @@
     </div>
 </div>
 
-<!-- Modal : suppression en masse -->
+<!-- ═══ Modal : forget devices ══════════════════════════════════════════════ -->
+<div class="modal fade" id="forgetDevicesModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-warning text-dark">
+                <h5 class="modal-title"><i class="bi bi-slash-circle"></i> Oublier les equipements</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>Oublier tous les equipements du site <strong id="forget-site-name"></strong> sans supprimer le site.</p>
+                <div class="alert alert-warning py-2">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    Les equipements seront dissocies du site. Cette action est irreversible.
+                </div>
+                <div id="forget-progress-wrapper" class="d-none">
+                    <p class="mb-1" id="forget-progress-text">Traitement en cours...</p>
+                    <div class="progress">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated bg-warning"
+                             id="forget-progress-bar" style="width: 0%"></div>
+                    </div>
+                </div>
+                <div id="forget-result" class="d-none mt-3"></div>
+            </div>
+            <div class="modal-footer" id="forget-modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+                <button type="button" class="btn btn-warning" id="confirm-forget-btn">
+                    <i class="bi bi-slash-circle"></i> Oublier
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ═══ Modal : forget en masse ═════════════════════════════════════════════ -->
+<div class="modal fade" id="bulkForgetModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-warning text-dark">
+                <h5 class="modal-title"><i class="bi bi-slash-circle"></i> Forget en masse</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="bulk-forget-confirm-section">
+                    <div class="alert alert-warning">
+                        <i class="bi bi-exclamation-triangle"></i>
+                        Oublier les equipements de <strong id="bulk-forget-modal-count">0</strong> site(s) sans supprimer les sites.
+                    </div>
+                    <p class="fw-bold mb-2">Sites selectionnes :</p>
+                    <ul id="bulk-forget-site-list" class="list-group mb-3" style="max-height:200px;overflow-y:auto"></ul>
+                </div>
+                <div id="bulk-forget-progress-section" class="d-none">
+                    <p class="fw-bold mb-2" id="bulk-forget-progress-text">Forget en cours...</p>
+                    <div class="progress mb-3">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated bg-warning"
+                             id="bulk-forget-progress-bar" style="width: 0%"></div>
+                    </div>
+                    <div id="bulk-forget-log" class="small bg-light p-2 rounded" style="max-height:250px;overflow-y:auto"></div>
+                </div>
+            </div>
+            <div class="modal-footer" id="bulk-forget-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+                <button type="button" class="btn btn-warning" id="bulk-forget-confirm-btn" onclick="executeBulkForget()">
+                    <i class="bi bi-slash-circle"></i> Forget tout
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ═══ Modal : suppression en masse ═══════════════════════════════════════ -->
 <div class="modal fade" id="bulkDeleteModal" tabindex="-1">
     <div class="modal-dialog">
         <div class="modal-content">
@@ -122,9 +200,9 @@
     </div>
 </div>
 
-<!-- Modal : creation en masse -->
+<!-- ═══ Modal : creation en masse ══════════════════════════════════════════ -->
 <div class="modal fade" id="bulkCreateModal" tabindex="-1">
-    <div class="modal-dialog">
+    <div class="modal-dialog modal-lg">
         <div class="modal-content">
             <div class="modal-header bg-success text-white">
                 <h5 class="modal-title"><i class="bi bi-layers"></i> Creation de sites en masse</h5>
@@ -132,79 +210,262 @@
             </div>
             <div class="modal-body">
                 <div id="bulk-form-section">
-                    <div class="mb-3">
-                        <label class="form-label fw-bold">Prefixe du nom</label>
-                        <input type="text" class="form-control" id="bulk-prefix" placeholder="Ex: LAB" value="LAB">
-                        <div class="form-text">Les sites seront nommes : Prefixe + numero</div>
-                    </div>
-                    <div class="row">
-                        <div class="col-6 mb-3">
-                            <label class="form-label fw-bold">Nombre de sites</label>
-                            <input type="number" class="form-control" id="bulk-count" min="1" max="100" value="3">
+                    <!-- Partie principale -->
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold">Prefixe du nom <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control form-control-lg" id="bulk-prefix" placeholder="Ex: Site, LAB, Client..." value="Site">
+                            <div class="form-text">Les sites seront nommes : <em>Prefixe Numero</em></div>
                         </div>
-                        <div class="col-6 mb-3">
-                            <label class="form-label fw-bold">Commencer a partir de</label>
-                            <input type="number" class="form-control" id="bulk-start" min="0" value="1">
+                        <div class="col-md-3">
+                            <label class="form-label fw-bold">Nombre</label>
+                            <input type="number" class="form-control form-control-lg" id="bulk-count" min="1" max="100" value="3">
                         </div>
-                    </div>
-                    <div class="row">
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label fw-bold">Region</label>
-                            <input type="text" class="form-control" id="bulk-region" value="France" placeholder="Ex: France">
-                            <div class="form-text">Valeur du site existant chargee automatiquement</div>
-                        </div>
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label fw-bold">Fuseau horaire</label>
-                            <input type="text" class="form-control" id="bulk-timezone" value="Europe/Paris" placeholder="Ex: Europe/Amsterdam">
-                            <div class="form-text">Valeur du site existant chargee automatiquement</div>
+                        <div class="col-md-3">
+                            <label class="form-label fw-bold">Debut a</label>
+                            <input type="number" class="form-control form-control-lg" id="bulk-start" min="0" value="1">
                         </div>
                     </div>
-                    <div class="row">
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label fw-bold">Scenario</label>
-                            <select class="form-select" id="bulk-scenario">
-                                <option value="">Chargement...</option>
-                            </select>
-                        </div>
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label fw-bold">Type</label>
-                            <select class="form-select" id="bulk-type">
-                                <option value="0">Basic</option>
-                                <option value="1">Pro</option>
-                            </select>
+
+                    <div class="alert alert-info py-2 mb-3" id="bulk-preview">
+                        <i class="bi bi-eye"></i> <strong>Apercu :</strong> <span id="bulk-preview-text"></span>
+                    </div>
+
+                    <!-- Parametres communs (collapsible) -->
+                    <div class="border rounded mb-3">
+                        <button class="btn btn-link w-100 text-start fw-bold px-3 py-2 text-decoration-none"
+                                type="button" data-bs-toggle="collapse" data-bs-target="#bulk-advanced"
+                                aria-expanded="false">
+                            <i class="bi bi-gear me-1"></i> Parametres communs a tous les sites
+                            <i class="bi bi-chevron-down ms-auto float-end mt-1"></i>
+                        </button>
+                        <div class="collapse" id="bulk-advanced">
+                            <div class="p-3 border-top">
+                                <div class="row g-2 mb-3">
+                                    <div class="col-md-5">
+                                        <label class="form-label small fw-bold">Region</label>
+                                        <input type="text" class="form-control form-control-sm" id="bulk-region" value="France" placeholder="Ex: France">
+                                    </div>
+                                    <div class="col-md-5">
+                                        <label class="form-label small fw-bold">Fuseau horaire</label>
+                                        <input type="text" class="form-control form-control-sm" id="bulk-timezone" value="Europe/Paris" placeholder="Europe/Paris">
+                                    </div>
+                                    <div class="col-md-2">
+                                        <label class="form-label small fw-bold">Type</label>
+                                        <select class="form-select form-select-sm" id="bulk-type">
+                                            <option value="0">Basic</option>
+                                            <option value="1">Pro</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label small fw-bold">Scenario</label>
+                                    <select class="form-select form-select-sm" id="bulk-scenario">
+                                        <option value="">Chargement...</option>
+                                    </select>
+                                </div>
+                                <hr class="my-2">
+                                <p class="fw-bold small mb-2"><i class="bi bi-shield-lock"></i> Compte equipement (Device Account)</p>
+                                <div class="row g-2">
+                                    <div class="col-md-4">
+                                        <label class="form-label small">Utilisateur <span class="text-danger">*</span></label>
+                                        <input type="text" class="form-control form-control-sm" id="bulk-dev-user" value="admin" placeholder="admin">
+                                    </div>
+                                    <div class="col-md-8">
+                                        <label class="form-label small">Mot de passe <span class="text-danger">*</span></label>
+                                        <input type="text" class="form-control form-control-sm" id="bulk-dev-pass" placeholder="Min 10 chars : maj, min, chiffres, symboles">
+                                        <div class="form-text">10-64 caracteres requis</div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
-                    <hr>
-                    <p class="fw-bold mb-2">Compte equipement (Device Account)</p>
-                    <div class="row">
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label">Utilisateur</label>
-                            <input type="text" class="form-control" id="bulk-dev-user" value="admin" placeholder="admin">
-                        </div>
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label">Mot de passe</label>
-                            <input type="text" class="form-control" id="bulk-dev-pass" placeholder="Min 10 chars complexe">
-                            <div class="form-text">10-64 chars: majuscules, minuscules, chiffres, symboles</div>
-                        </div>
-                    </div>
-                    <div class="alert alert-info py-2" id="bulk-preview">
-                        <strong>Apercu :</strong> <span id="bulk-preview-text"></span>
-                    </div>
+
                     <div id="bulk-error" class="alert alert-danger d-none"></div>
                 </div>
+
+                <!-- Progression -->
                 <div id="bulk-progress-section" class="d-none">
                     <p class="fw-bold mb-2" id="bulk-progress-text">Creation en cours...</p>
                     <div class="progress mb-3">
                         <div class="progress-bar progress-bar-striped progress-bar-animated bg-success"
                              id="bulk-progress-bar" style="width: 0%"></div>
                     </div>
-                    <div id="bulk-log" class="small bg-light p-2 rounded" style="max-height:250px;overflow-y:auto"></div>
+                    <div id="bulk-log" class="small bg-light p-2 rounded" style="max-height:280px;overflow-y:auto;font-family:monospace"></div>
                 </div>
             </div>
             <div class="modal-footer" id="bulk-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
                 <button type="button" class="btn btn-success" id="bulk-create-btn" onclick="executeBulkCreate()">
                     <i class="bi bi-layers"></i> Creer les sites
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ═══ Modal : adoption de devices via CSV ═════════════════════════════════ -->
+<div class="modal fade" id="adoptModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title"><i class="bi bi-file-earmark-arrow-up"></i> Adoption de devices par fichier</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="adopt-form-section">
+                    <!-- Info format -->
+                    <div class="d-flex justify-content-between align-items-start mb-3">
+                        <div class="small text-muted">
+                            <p class="mb-1 fw-bold">Format CSV attendu :</p>
+                            <code>site_id,device_key,mac,label</code><br>
+                            <span class="text-danger">site_id</span> et <span class="text-danger">device_key</span> sont obligatoires. <em>mac</em> et <em>label</em> sont optionnels.
+                        </div>
+                        <button class="btn btn-outline-secondary btn-sm" onclick="downloadCsvTemplate()">
+                            <i class="bi bi-download"></i> Template CSV
+                        </button>
+                    </div>
+
+                    <!-- Zone de drop fichier -->
+                    <div id="adopt-drop-zone"
+                         class="border border-2 border-dashed rounded p-4 text-center mb-3"
+                         style="cursor:pointer; border-style:dashed !important;"
+                         onclick="document.getElementById('adopt-file-input').click()"
+                         ondragover="event.preventDefault(); this.classList.add('border-primary')"
+                         ondragleave="this.classList.remove('border-primary')"
+                         ondrop="handleAdoptFileDrop(event)">
+                        <i class="bi bi-cloud-upload fs-2 text-muted"></i>
+                        <p class="mb-1 mt-2">Glisser le fichier CSV ici ou <span class="text-primary">parcourir</span></p>
+                        <small class="text-muted">Fichier .csv uniquement</small>
+                        <input type="file" id="adopt-file-input" accept=".csv,text/csv" class="d-none" onchange="handleAdoptFile(this.files[0])">
+                    </div>
+
+                    <!-- Apercu tableau -->
+                    <div id="adopt-preview-wrapper" class="d-none">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <p class="fw-bold mb-0" id="adopt-preview-count"></p>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="resetAdoptForm()">
+                                <i class="bi bi-x"></i> Changer de fichier
+                            </button>
+                        </div>
+                        <div class="table-responsive" style="max-height:280px;overflow-y:auto">
+                            <table class="table table-sm table-hover align-middle mb-0">
+                                <thead class="table-light sticky-top">
+                                    <tr>
+                                        <th>#</th>
+                                        <th>Site ID</th>
+                                        <th>Device Key</th>
+                                        <th>MAC</th>
+                                        <th>Label</th>
+                                        <th>Statut</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="adopt-preview-tbody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div id="adopt-error" class="alert alert-danger d-none mt-3"></div>
+                </div>
+
+                <!-- Progression -->
+                <div id="adopt-progress-section" class="d-none">
+                    <p class="fw-bold mb-2" id="adopt-progress-text">Adoption en cours...</p>
+                    <div class="progress mb-3">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated bg-primary"
+                             id="adopt-progress-bar" style="width: 0%"></div>
+                    </div>
+                    <div id="adopt-log" class="small bg-light p-2 rounded" style="max-height:300px;overflow-y:auto;font-family:monospace"></div>
+                </div>
+            </div>
+            <div class="modal-footer" id="adopt-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+                <button type="button" class="btn btn-primary" id="adopt-run-btn" onclick="executeAdoption()" disabled>
+                    <i class="bi bi-play-fill"></i> Lancer l'adoption
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ═══ Modal : export devices CSV ══════════════════════════════════════════ -->
+<div class="modal fade" id="exportModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header bg-info text-white">
+                <h5 class="modal-title"><i class="bi bi-file-earmark-arrow-down"></i> Export des équipements</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <!-- État initial -->
+                <div id="export-idle-section">
+                    <p class="mb-2">Exporte tous les équipements de tous les sites. Deux formats CSV disponibles :</p>
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-6">
+                            <div class="card border-success h-100">
+                                <div class="card-header bg-success text-white py-2">
+                                    <i class="bi bi-recycle"></i> <strong>CSV pour réimport</strong>
+                                </div>
+                                <div class="card-body py-2 small">
+                                    Format compatible avec le bouton <strong>"Adopter devices"</strong> :<br>
+                                    <code>site_id, device_key, mac, label</code>
+                                    <div class="mt-2 text-muted">Permet de réadopter les équipements sur leurs sites d'origine.</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="card border-secondary h-100">
+                                <div class="card-header bg-secondary text-white py-2">
+                                    <i class="bi bi-table"></i> <strong>CSV complet</strong>
+                                </div>
+                                <div class="card-body py-2 small">
+                                    Tous les champs : <code>site_name, mac, serial, device_key, nom, modèle, IP, firmware…</code>
+                                    <div class="mt-2 text-muted">Pour inventaire et suivi.</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="alert alert-warning py-2 small mb-0">
+                        <i class="bi bi-info-circle"></i>
+                        Le champ <strong>Device Key</strong> n'est pas toujours renvoyé par l'API Omada pour les équipements déjà adoptés.
+                        S'il est vide, il faudra le récupérer sur l'étiquette physique de l'équipement.
+                    </div>
+                </div>
+                <!-- Progression -->
+                <div id="export-progress-section" class="d-none">
+                    <p class="fw-bold mb-2" id="export-progress-text">Récupération en cours...</p>
+                    <div class="progress mb-3">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated bg-secondary"
+                             id="export-progress-bar" style="width: 100%"></div>
+                    </div>
+                </div>
+                <!-- Résultats -->
+                <div id="export-result-section" class="d-none">
+                    <div class="alert alert-success py-2 mb-3" id="export-summary"></div>
+                    <div class="table-responsive" style="max-height:340px; overflow-y:auto">
+                        <table class="table table-sm table-hover align-middle mb-0">
+                            <thead class="table-light sticky-top">
+                                <tr>
+                                    <th>Site</th>
+                                    <th>Nom</th>
+                                    <th>Modèle</th>
+                                    <th>MAC</th>
+                                    <th>N° Série</th>
+                                    <th>Device Key</th>
+                                    <th>IP</th>
+                                    <th>Site ID</th>
+                                </tr>
+                            </thead>
+                            <tbody id="export-tbody"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div id="export-error" class="alert alert-danger d-none mt-3"></div>
+            </div>
+            <div class="modal-footer" id="export-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+                <button type="button" class="btn btn-info text-white" id="export-run-btn" onclick="executeExport()">
+                    <i class="bi bi-search"></i> Lancer l'export
                 </button>
             </div>
         </div>
@@ -218,6 +479,11 @@
 const PROFILE_MODE = '{{ profile_mode }}';
 let currentDeleteSiteId = null;
 let currentDeleteCustomerId = null;
+let adoptEntries = [];
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Chargement des sites
+// ═══════════════════════════════════════════════════════════════════════════
 
 async function loadSites() {
     const loading = document.getElementById('sites-loading');
@@ -235,7 +501,6 @@ async function loadSites() {
         const resp = await fetch('/api/sites');
         if (resp.status === 401) { window.location.href = '/'; return; }
         const data = await resp.json();
-
         loading.classList.add('d-none');
 
         if (data.errorCode && data.errorCode !== 0) {
@@ -245,11 +510,7 @@ async function loadSites() {
         }
 
         const sites = (data.result && data.result.data) || [];
-
-        if (sites.length === 0) {
-            empty.classList.remove('d-none');
-            return;
-        }
+        if (sites.length === 0) { empty.classList.remove('d-none'); return; }
 
         tbody.innerHTML = '';
         sites.forEach(site => {
@@ -261,7 +522,6 @@ async function loadSites() {
                 ? '<span class="badge bg-info">Pro</span>'
                 : '<span class="badge bg-secondary">Basic</span>';
 
-            // Device counts from MSP response (may not exist in Customer mode)
             const apConn = site.connectedApNum || 0;
             const apDisc = site.disconnectedApNum || 0;
             const apIso = site.isolatedApNum || 0;
@@ -282,9 +542,11 @@ async function loadSites() {
             }
 
             const tr = document.createElement('tr');
-            let cells = `<td><input type="checkbox" class="form-check-input site-checkbox" data-site-id="${siteId}" data-site-name="${escapeHtml(siteName)}" data-customer-id="${customerId}" onchange="updateBulkDeleteBtn()"></td>`;
+            let cells = `<td><input type="checkbox" class="form-check-input site-checkbox"
+                data-site-id="${siteId}" data-site-name="${escapeHtml(siteName)}" data-customer-id="${customerId}"
+                onchange="updateBulkDeleteBtn()"></td>`;
             cells += `<td><a href="/sites/${siteId}" class="text-decoration-none fw-bold">${escapeHtml(siteName)}</a></td>`;
-            if (PROFILE_MODE !== 'customer') {
+            if (PROFILE_MODE === 'msp') {
                 cells += `<td><span class="badge bg-light text-dark">${escapeHtml(customerName)}</span></td>`;
             }
             cells += `
@@ -295,6 +557,10 @@ async function loadSites() {
                     <a href="/sites/${siteId}" class="btn btn-sm btn-outline-primary me-1" title="Details">
                         <i class="bi bi-eye"></i>
                     </a>
+                    <button class="btn btn-sm btn-outline-warning me-1" title="Oublier les equipements"
+                            onclick="showForgetDevicesModal('${siteId}', '${escapeHtml(siteName)}', '${customerId}')">
+                        <i class="bi bi-slash-circle"></i>
+                    </button>
                     <button class="btn btn-sm btn-outline-danger" title="Supprimer"
                             onclick="showDeleteModal('${siteId}', '${escapeHtml(siteName)}', '${customerId}')">
                         <i class="bi bi-trash"></i>
@@ -312,6 +578,10 @@ async function loadSites() {
     }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Suppression unitaire
+// ═══════════════════════════════════════════════════════════════════════════
+
 function showDeleteModal(siteId, siteName, customerId) {
     currentDeleteSiteId = siteId;
     currentDeleteCustomerId = customerId;
@@ -323,7 +593,6 @@ function showDeleteModal(siteId, siteName, customerId) {
     document.getElementById('confirm-delete-btn').disabled = false;
     document.getElementById('confirm-delete-btn').classList.remove('d-none');
     document.querySelector('#delete-modal-footer .btn-secondary').classList.remove('d-none');
-
     new bootstrap.Modal(document.getElementById('deleteModal')).show();
 }
 
@@ -335,20 +604,17 @@ document.getElementById('confirm-delete-btn').addEventListener('click', async fu
     const progressText = document.getElementById('delete-progress-text');
     const resultDiv = document.getElementById('delete-result');
     document.querySelector('#delete-modal-footer .btn-secondary').classList.add('d-none');
-
     progressWrapper.classList.remove('d-none');
 
     try {
-        let resp, data;
-        // Always use delete-with-forget workflow
         progressText.textContent = 'Forget des equipements + suppression...';
         progressBar.style.width = '30%';
-        resp = await fetch(`/api/sites/${currentDeleteSiteId}/delete-with-forget`, {
+        const resp = await fetch(`/api/sites/${currentDeleteSiteId}/delete-with-forget`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({customerId: currentDeleteCustomerId}),
         });
-        data = await resp.json();
+        const data = await resp.json();
         progressBar.style.width = '100%';
         progressBar.classList.remove('progress-bar-animated');
         const ok = data.delete_status === 200 && (!data.delete_result.errorCode || data.delete_result.errorCode === 0);
@@ -373,41 +639,104 @@ document.getElementById('confirm-delete-btn').addEventListener('click', async fu
     }, 2000);
 });
 
-// ==================== Bulk select & delete ====================
+// ═══════════════════════════════════════════════════════════════════════════
+// Forget devices (sans suppression du site)
+// ═══════════════════════════════════════════════════════════════════════════
+
+let currentForgetSiteId = '';
+let currentForgetCustomerId = '';
+
+function showForgetDevicesModal(siteId, siteName, customerId) {
+    currentForgetSiteId = siteId;
+    currentForgetCustomerId = customerId;
+    document.getElementById('forget-site-name').textContent = siteName;
+    document.getElementById('forget-progress-wrapper').classList.add('d-none');
+    document.getElementById('forget-result').classList.add('d-none');
+    document.getElementById('forget-progress-bar').className = 'progress-bar progress-bar-striped progress-bar-animated bg-warning';
+    document.getElementById('forget-progress-bar').style.width = '0%';
+    document.getElementById('confirm-forget-btn').disabled = false;
+    document.getElementById('confirm-forget-btn').classList.remove('d-none');
+    document.querySelector('#forget-modal-footer .btn-secondary').classList.remove('d-none');
+    new bootstrap.Modal(document.getElementById('forgetDevicesModal')).show();
+}
+
+document.getElementById('confirm-forget-btn').addEventListener('click', async function() {
+    const btn = this;
+    btn.disabled = true;
+    const progressWrapper = document.getElementById('forget-progress-wrapper');
+    const progressBar = document.getElementById('forget-progress-bar');
+    const progressText = document.getElementById('forget-progress-text');
+    const resultDiv = document.getElementById('forget-result');
+    document.querySelector('#forget-modal-footer .btn-secondary').classList.add('d-none');
+    progressWrapper.classList.remove('d-none');
+
+    try {
+        progressText.textContent = 'Oubli des equipements en cours...';
+        progressBar.style.width = '30%';
+        const resp = await fetch(`/api/sites/${currentForgetSiteId}/forget-devices`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({customerId: currentForgetCustomerId}),
+        });
+        const data = await resp.json();
+        progressBar.style.width = '100%';
+        progressBar.classList.remove('progress-bar-animated');
+        if (data.total === 0) {
+            progressBar.classList.add('bg-info');
+            resultDiv.innerHTML = '<div class="alert alert-info mb-0"><i class="bi bi-info-circle"></i> Aucun equipement trouve sur ce site.</div>';
+        } else if (data.ok === data.total) {
+            progressBar.classList.add('bg-success');
+            resultDiv.innerHTML = `<div class="alert alert-success mb-0"><i class="bi bi-check-circle"></i> ${data.ok}/${data.total} equipement(s) oublie(s) avec succes.</div>`;
+        } else {
+            progressBar.classList.add('bg-warning');
+            resultDiv.innerHTML = `<div class="alert alert-warning mb-0"><i class="bi bi-exclamation-triangle"></i> ${data.ok}/${data.total} equipement(s) oublie(s).</div>`;
+        }
+    } catch (err) {
+        progressBar.style.width = '100%';
+        progressBar.classList.add('bg-danger');
+        resultDiv.innerHTML = `<div class="alert alert-danger mb-0">${escapeHtml(err.message)}</div>`;
+    }
+
+    resultDiv.classList.remove('d-none');
+    btn.classList.add('d-none');
+    setTimeout(() => {
+        bootstrap.Modal.getInstance(document.getElementById('forgetDevicesModal')).hide();
+        loadSites();
+    }, 2500);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Suppression en masse
+// ═══════════════════════════════════════════════════════════════════════════
 
 function toggleSelectAll(masterCheckbox) {
-    document.querySelectorAll('.site-checkbox').forEach(cb => {
-        cb.checked = masterCheckbox.checked;
-    });
+    document.querySelectorAll('.site-checkbox').forEach(cb => { cb.checked = masterCheckbox.checked; });
     updateBulkDeleteBtn();
 }
 
 function updateBulkDeleteBtn() {
     const checked = document.querySelectorAll('.site-checkbox:checked');
-    const btn = document.getElementById('bulk-delete-btn');
-    const countSpan = document.getElementById('bulk-delete-count');
-    countSpan.textContent = checked.length;
-    if (checked.length > 0) {
-        btn.disabled = false;
-        btn.className = 'btn btn-danger';
-    } else {
-        btn.disabled = true;
-        btn.className = 'btn btn-outline-secondary';
-    }
-    // Sync select-all checkbox
+    const n = checked.length;
+
+    const delBtn = document.getElementById('bulk-delete-btn');
+    document.getElementById('bulk-delete-count').textContent = n;
+    delBtn.disabled = n === 0;
+    delBtn.className = n > 0 ? 'btn btn-danger' : 'btn btn-outline-secondary';
+
+    const forgetBtn = document.getElementById('bulk-forget-btn');
+    document.getElementById('bulk-forget-count').textContent = n;
+    forgetBtn.disabled = n === 0;
+    forgetBtn.className = n > 0 ? 'btn btn-warning' : 'btn btn-outline-secondary';
+
     const all = document.querySelectorAll('.site-checkbox');
     const selectAll = document.getElementById('select-all-sites');
-    if (selectAll) selectAll.checked = all.length > 0 && checked.length === all.length;
+    if (selectAll) selectAll.checked = all.length > 0 && n === all.length;
 }
 
 function getSelectedSites() {
     const selected = [];
     document.querySelectorAll('.site-checkbox:checked').forEach(cb => {
-        selected.push({
-            siteId: cb.dataset.siteId,
-            siteName: cb.dataset.siteName,
-            customerId: cb.dataset.customerId,
-        });
+        selected.push({ siteId: cb.dataset.siteId, siteName: cb.dataset.siteName, customerId: cb.dataset.customerId });
     });
     return selected;
 }
@@ -415,7 +744,6 @@ function getSelectedSites() {
 function showBulkDeleteModal() {
     const sites = getSelectedSites();
     if (sites.length === 0) return;
-
     document.getElementById('bulk-delete-modal-count').textContent = sites.length;
     const list = document.getElementById('bulk-delete-site-list');
     list.innerHTML = '';
@@ -425,14 +753,12 @@ function showBulkDeleteModal() {
         li.textContent = s.siteName;
         list.appendChild(li);
     });
-
     document.getElementById('bulk-delete-confirm-section').classList.remove('d-none');
     document.getElementById('bulk-delete-progress-section').classList.add('d-none');
     document.getElementById('bulk-delete-confirm-input').value = '';
     document.getElementById('bulk-delete-confirm-btn').disabled = true;
     document.getElementById('bulk-delete-footer').querySelector('.btn-secondary').classList.remove('d-none');
     document.getElementById('bulk-delete-confirm-btn').classList.remove('d-none');
-
     new bootstrap.Modal(document.getElementById('bulkDeleteModal')).show();
 }
 
@@ -443,7 +769,6 @@ document.getElementById('bulk-delete-confirm-input').addEventListener('input', f
 async function executeBulkDelete() {
     const sites = getSelectedSites();
     if (sites.length === 0) return;
-
     document.getElementById('bulk-delete-confirm-section').classList.add('d-none');
     document.getElementById('bulk-delete-progress-section').classList.remove('d-none');
     document.getElementById('bulk-delete-confirm-btn').classList.add('d-none');
@@ -453,35 +778,30 @@ async function executeBulkDelete() {
     const text = document.getElementById('bulk-delete-progress-text');
     const log = document.getElementById('bulk-delete-log');
     log.innerHTML = '';
-
-    let success = 0;
-    let failed = 0;
+    let success = 0, failed = 0;
 
     for (let i = 0; i < sites.length; i++) {
         const site = sites[i];
         const pct = Math.round(((i + 1) / sites.length) * 100);
         text.textContent = `Suppression ${i + 1}/${sites.length} : ${site.siteName}...`;
         bar.style.width = pct + '%';
-
         try {
             const resp = await fetch(`/api/sites/${site.siteId}/delete-with-forget`, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
+                method: 'POST', headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({customerId: site.customerId}),
             });
             const data = await resp.json();
             const ok = data.delete_status === 200 && (!data.delete_result.errorCode || data.delete_result.errorCode === 0);
             if (ok) {
                 success++;
-                log.innerHTML += `<div class="text-success"><i class="bi bi-check-circle"></i> ${escapeHtml(site.siteName)} - supprime</div>`;
+                log.innerHTML += `<div class="text-success"><i class="bi bi-check-circle"></i> ${escapeHtml(site.siteName)} — supprime</div>`;
             } else {
                 failed++;
-                const msg = (data.delete_result && data.delete_result.msg) || 'Erreur';
-                log.innerHTML += `<div class="text-danger"><i class="bi bi-x-circle"></i> ${escapeHtml(site.siteName)} - ${escapeHtml(msg)}</div>`;
+                log.innerHTML += `<div class="text-danger"><i class="bi bi-x-circle"></i> ${escapeHtml(site.siteName)} — ${escapeHtml((data.delete_result && data.delete_result.msg) || 'Erreur')}</div>`;
             }
         } catch (err) {
             failed++;
-            log.innerHTML += `<div class="text-danger"><i class="bi bi-x-circle"></i> ${escapeHtml(site.siteName)} - ${escapeHtml(err.message)}</div>`;
+            log.innerHTML += `<div class="text-danger"><i class="bi bi-x-circle"></i> ${escapeHtml(site.siteName)} — ${escapeHtml(err.message)}</div>`;
         }
         log.scrollTop = log.scrollHeight;
     }
@@ -489,14 +809,11 @@ async function executeBulkDelete() {
     bar.classList.remove('progress-bar-animated');
     bar.style.width = '100%';
     text.textContent = `Termine : ${success} supprime(s), ${failed} erreur(s)`;
-
-    // Show close button
-    document.getElementById('bulk-delete-footer').querySelector('.btn-secondary').classList.remove('d-none');
-    document.getElementById('bulk-delete-footer').querySelector('.btn-secondary').textContent = 'Fermer';
-
+    const closeBtn = document.getElementById('bulk-delete-footer').querySelector('.btn-secondary');
+    closeBtn.classList.remove('d-none');
+    closeBtn.textContent = 'Fermer';
     setTimeout(() => {
         bootstrap.Modal.getInstance(document.getElementById('bulkDeleteModal'))?.hide();
-        // Reset selection state
         document.getElementById('select-all-sites').checked = false;
         document.getElementById('bulk-delete-btn').disabled = true;
         document.getElementById('bulk-delete-btn').className = 'btn btn-outline-secondary';
@@ -505,7 +822,81 @@ async function executeBulkDelete() {
     }, 3000);
 }
 
-// ==================== Bulk create ====================
+// ═══════════════════════════════════════════════════════════════════════════
+// Forget en masse
+// ═══════════════════════════════════════════════════════════════════════════
+
+function showBulkForgetModal() {
+    const sites = getSelectedSites();
+    if (sites.length === 0) return;
+    document.getElementById('bulk-forget-modal-count').textContent = sites.length;
+    const list = document.getElementById('bulk-forget-site-list');
+    list.innerHTML = '';
+    sites.forEach(s => {
+        const li = document.createElement('li');
+        li.className = 'list-group-item py-1';
+        li.textContent = s.siteName;
+        list.appendChild(li);
+    });
+    document.getElementById('bulk-forget-confirm-section').classList.remove('d-none');
+    document.getElementById('bulk-forget-progress-section').classList.add('d-none');
+    document.getElementById('bulk-forget-footer').querySelector('.btn-secondary').classList.remove('d-none');
+    document.getElementById('bulk-forget-confirm-btn').classList.remove('d-none');
+    new bootstrap.Modal(document.getElementById('bulkForgetModal')).show();
+}
+
+async function executeBulkForget() {
+    const sites = getSelectedSites();
+    if (sites.length === 0) return;
+    document.getElementById('bulk-forget-confirm-section').classList.add('d-none');
+    document.getElementById('bulk-forget-progress-section').classList.remove('d-none');
+    document.getElementById('bulk-forget-confirm-btn').classList.add('d-none');
+    document.getElementById('bulk-forget-footer').querySelector('.btn-secondary').classList.add('d-none');
+
+    const bar = document.getElementById('bulk-forget-progress-bar');
+    const text = document.getElementById('bulk-forget-progress-text');
+    const log = document.getElementById('bulk-forget-log');
+    log.innerHTML = '';
+    let success = 0, failed = 0;
+
+    for (let i = 0; i < sites.length; i++) {
+        const site = sites[i];
+        const pct = Math.round(((i + 1) / sites.length) * 100);
+        text.textContent = `Forget ${i + 1}/${sites.length} : ${site.siteName}...`;
+        bar.style.width = pct + '%';
+        try {
+            const resp = await fetch(`/api/sites/${site.siteId}/forget-devices`, {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({customerId: site.customerId}),
+            });
+            const data = await resp.json();
+            success++;
+            log.innerHTML += `<div class="text-success"><i class="bi bi-check-circle"></i> ${escapeHtml(site.siteName)} — ${data.ok}/${data.total} device(s) oublie(s)</div>`;
+        } catch (err) {
+            failed++;
+            log.innerHTML += `<div class="text-danger"><i class="bi bi-x-circle"></i> ${escapeHtml(site.siteName)} — ${escapeHtml(err.message)}</div>`;
+        }
+        log.scrollTop = log.scrollHeight;
+    }
+
+    bar.classList.remove('progress-bar-animated');
+    bar.style.width = '100%';
+    text.textContent = `Termine : ${success} site(s) traite(s)${failed > 0 ? `, ${failed} erreur(s)` : ''}`;
+    const closeBtn = document.getElementById('bulk-forget-footer').querySelector('.btn-secondary');
+    closeBtn.classList.remove('d-none');
+    closeBtn.textContent = 'Fermer';
+    setTimeout(() => {
+        bootstrap.Modal.getInstance(document.getElementById('bulkForgetModal'))?.hide();
+        document.getElementById('select-all-sites').checked = false;
+        updateBulkDeleteBtn();
+        loadSites();
+    }, 3000);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Creation en masse
+// ═══════════════════════════════════════════════════════════════════════════
+
 async function loadBulkScenarios() {
     const select = document.getElementById('bulk-scenario');
     try {
@@ -518,8 +909,7 @@ async function loadBulkScenarios() {
                 const name = typeof s === 'string' ? s : (s.name || s.scenario || '');
                 if (name) {
                     const opt = document.createElement('option');
-                    opt.value = name;
-                    opt.textContent = name;
+                    opt.value = name; opt.textContent = name;
                     select.appendChild(opt);
                 }
             });
@@ -533,21 +923,18 @@ async function loadBulkScenarios() {
 }
 loadBulkScenarios();
 
-// Load defaults (region, timezone, scenario) from existing site
 async function loadSiteDefaults() {
     try {
         const resp = await fetch('/api/site-defaults');
+        if (!resp.ok) return;
         const data = await resp.json();
         if (data.region) document.getElementById('bulk-region').value = data.region;
         if (data.timeZone) document.getElementById('bulk-timezone').value = data.timeZone;
-        // Pre-select scenario if available
         if (data.scenario) {
-            const scenarioSelect = document.getElementById('bulk-scenario');
-            for (const opt of scenarioSelect.options) {
-                if (opt.value === data.scenario) { opt.selected = true; break; }
-            }
+            const sel = document.getElementById('bulk-scenario');
+            for (const opt of sel.options) { if (opt.value === data.scenario) { opt.selected = true; break; } }
         }
-    } catch(e) { /* ignore */ }
+    } catch(e) {}
 }
 loadSiteDefaults();
 
@@ -558,7 +945,7 @@ function updateBulkPreview() {
     const names = [];
     const maxShow = Math.min(count, 5);
     for (let i = 0; i < maxShow; i++) names.push(`${prefix} ${start + i}`);
-    if (count > 5) names.push('...');
+    if (count > 5) names.push(`... (${count} au total)`);
     document.getElementById('bulk-preview-text').textContent = names.join(', ');
 }
 
@@ -566,20 +953,18 @@ function showBulkCreateModal() {
     document.getElementById('bulk-form-section').classList.remove('d-none');
     document.getElementById('bulk-progress-section').classList.add('d-none');
     document.getElementById('bulk-error').classList.add('d-none');
+    document.getElementById('bulk-log').innerHTML = '';
     document.getElementById('bulk-footer').innerHTML = `
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
-        <button type="button" class="btn btn-success" id="bulk-create-btn" onclick="executeBulkCreate()">
+        <button type="button" class="btn btn-success" onclick="executeBulkCreate()">
             <i class="bi bi-layers"></i> Creer les sites
         </button>`;
-    document.getElementById('bulk-log').innerHTML = '';
     updateBulkPreview();
     new bootstrap.Modal(document.getElementById('bulkCreateModal')).show();
 }
 
-// Live preview
 ['bulk-prefix', 'bulk-count', 'bulk-start'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.addEventListener('input', updateBulkPreview);
+    document.getElementById(id)?.addEventListener('input', updateBulkPreview);
 });
 
 async function executeBulkCreate() {
@@ -595,29 +980,27 @@ async function executeBulkCreate() {
     const errorDiv = document.getElementById('bulk-error');
 
     if (!prefix) {
-        errorDiv.textContent = 'Le prefixe est obligatoire';
-        errorDiv.classList.remove('d-none');
-        return;
+        errorDiv.textContent = 'Le prefixe est obligatoire'; errorDiv.classList.remove('d-none'); return;
     }
     if (!devUser || !devPass) {
-        errorDiv.textContent = 'Utilisateur et mot de passe device sont obligatoires';
-        errorDiv.classList.remove('d-none');
-        return;
+        // Ouvrir la section avancée si credentials manquants
+        document.getElementById('bulk-advanced').classList.add('show');
+        errorDiv.textContent = 'Utilisateur et mot de passe device sont obligatoires (section Parametres communs)';
+        errorDiv.classList.remove('d-none'); return;
     }
     if (devPass.length < 10) {
+        document.getElementById('bulk-advanced').classList.add('show');
         errorDiv.textContent = 'Le mot de passe device doit faire au moins 10 caracteres';
-        errorDiv.classList.remove('d-none');
-        return;
+        errorDiv.classList.remove('d-none'); return;
     }
 
     document.getElementById('bulk-form-section').classList.add('d-none');
     document.getElementById('bulk-progress-section').classList.remove('d-none');
-    document.getElementById('bulk-footer').querySelector('.btn-success')?.classList.add('d-none');
+    document.getElementById('bulk-footer').innerHTML = '';
 
     const bar = document.getElementById('bulk-progress-bar');
     const text = document.getElementById('bulk-progress-text');
     const log = document.getElementById('bulk-log');
-
     text.textContent = `Creation de ${count} site(s)...`;
     bar.style.width = '10%';
     log.innerHTML = '';
@@ -629,14 +1012,8 @@ async function executeBulkCreate() {
             body: JSON.stringify({
                 prefix, count, start,
                 extra: {
-                    region: region,
-                    timeZone: timeZone,
-                    scenario: scenario,
-                    type: siteType,
-                    deviceAccountSetting: {
-                        username: devUser,
-                        password: devPass,
-                    },
+                    region, timeZone, scenario, type: siteType,
+                    deviceAccountSetting: { username: devUser, password: devPass },
                 },
             }),
         });
@@ -653,9 +1030,9 @@ async function executeBulkCreate() {
             let okCount = 0;
             results.forEach(r => {
                 if (r.success) okCount++;
-                const icon = r.success ? '&#10003;' : '&#10007;';
                 log.innerHTML += `<div class="${r.success ? 'text-success' : 'text-danger'}">
-                    ${icon} <strong>${escapeHtml(r.name)}</strong> ${r.success ? '- Cree' : '- ' + escapeHtml(r.msg || 'Echec')}
+                    ${r.success ? '&#10003;' : '&#10007;'} <strong>${escapeHtml(r.name)}</strong>
+                    — ${r.success ? 'Cree' : escapeHtml(r.msg || 'Echec')}
                 </div>`;
                 log.scrollTop = log.scrollHeight;
             });
@@ -675,6 +1052,317 @@ async function executeBulkCreate() {
         </button>`;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Adoption de devices par CSV
+// ═══════════════════════════════════════════════════════════════════════════
+
+function showAdoptModal() {
+    resetAdoptForm();
+    new bootstrap.Modal(document.getElementById('adoptModal')).show();
+}
+
+function resetAdoptForm() {
+    adoptEntries = [];
+    document.getElementById('adopt-form-section').classList.remove('d-none');
+    document.getElementById('adopt-progress-section').classList.add('d-none');
+    document.getElementById('adopt-preview-wrapper').classList.add('d-none');
+    document.getElementById('adopt-error').classList.add('d-none');
+    document.getElementById('adopt-file-input').value = '';
+    document.getElementById('adopt-preview-tbody').innerHTML = '';
+    document.getElementById('adopt-run-btn').disabled = true;
+    document.getElementById('adopt-footer').innerHTML = `
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+        <button type="button" class="btn btn-primary" id="adopt-run-btn" onclick="executeAdoption()" disabled>
+            <i class="bi bi-play-fill"></i> Lancer l'adoption
+        </button>`;
+}
+
+function downloadCsvTemplate() {
+    const csv = 'site_id,device_key,mac,label\nREMPLACER_PAR_SITE_ID,XXXX-XXXX-XXXX,AA:BB:CC:DD:EE:FF,Nom du device\n';
+    const a = document.createElement('a');
+    a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+    a.download = 'template_adoption_devices.csv';
+    a.click();
+}
+
+function handleAdoptFileDrop(event) {
+    event.preventDefault();
+    document.getElementById('adopt-drop-zone').classList.remove('border-primary');
+    const file = event.dataTransfer.files[0];
+    if (file) handleAdoptFile(file);
+}
+
+function handleAdoptFile(file) {
+    if (!file) return;
+    const errorDiv = document.getElementById('adopt-error');
+    errorDiv.classList.add('d-none');
+
+    if (!file.name.endsWith('.csv') && file.type !== 'text/csv') {
+        errorDiv.textContent = 'Seuls les fichiers .csv sont acceptes';
+        errorDiv.classList.remove('d-none');
+        return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const text = e.target.result;
+        parseCsvAndPreview(text);
+    };
+    reader.readAsText(file, 'UTF-8');
+}
+
+function parseCsvAndPreview(text) {
+    const errorDiv = document.getElementById('adopt-error');
+    const lines = text.split(/\r?\n/).filter(l => l.trim());
+
+    if (lines.length < 2) {
+        errorDiv.textContent = 'Le fichier CSV doit contenir au moins une ligne de donnees (+ header)';
+        errorDiv.classList.remove('d-none');
+        return;
+    }
+
+    // Parse header (case-insensitive)
+    const header = lines[0].split(',').map(h => h.trim().toLowerCase());
+    const idxSiteId   = header.findIndex(h => h === 'site_id');
+    const idxKey      = header.findIndex(h => h === 'device_key' || h === 'key');
+    const idxMac      = header.findIndex(h => h === 'mac');
+    const idxLabel    = header.findIndex(h => h === 'label' || h === 'nom' || h === 'name');
+
+    if (idxSiteId === -1 || idxKey === -1) {
+        errorDiv.textContent = 'Colonnes obligatoires manquantes : site_id et device_key';
+        errorDiv.classList.remove('d-none');
+        return;
+    }
+
+    adoptEntries = [];
+    const tbody = document.getElementById('adopt-preview-tbody');
+    tbody.innerHTML = '';
+
+    for (let i = 1; i < lines.length; i++) {
+        const cols = lines[i].split(',').map(c => c.trim());
+        const entry = {
+            site_id:   cols[idxSiteId]   || '',
+            key:       cols[idxKey]       || '',
+            mac:       idxMac  >= 0 ? (cols[idxMac]   || '') : '',
+            label:     idxLabel >= 0 ? (cols[idxLabel] || '') : '',
+        };
+        const valid = entry.site_id && entry.key;
+        adoptEntries.push(entry);
+
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td class="text-muted">${i}</td>
+            <td><code class="small">${escapeHtml(entry.site_id)}</code></td>
+            <td><code class="small">${escapeHtml(entry.key)}</code></td>
+            <td><code class="small">${escapeHtml(entry.mac) || '<span class="text-muted">-</span>'}</code></td>
+            <td>${escapeHtml(entry.label) || '<span class="text-muted">-</span>'}</td>
+            <td>${valid
+                ? '<span class="badge bg-success">OK</span>'
+                : '<span class="badge bg-danger">Incomplet</span>'
+            }</td>
+        `;
+        tbody.appendChild(tr);
+    }
+
+    const validCount = adoptEntries.filter(e => e.site_id && e.key).length;
+    document.getElementById('adopt-preview-count').textContent =
+        `${adoptEntries.length} entree(s) detectee(s) — ${validCount} valide(s)`;
+    document.getElementById('adopt-preview-wrapper').classList.remove('d-none');
+    document.getElementById('adopt-run-btn').disabled = validCount === 0;
+
+    if (validCount === 0) {
+        errorDiv.textContent = 'Aucune entree valide trouvee (site_id et device_key obligatoires)';
+        errorDiv.classList.remove('d-none');
+    }
+}
+
+async function executeAdoption() {
+    const valid = adoptEntries.filter(e => e.site_id && e.key);
+    if (valid.length === 0) return;
+
+    document.getElementById('adopt-form-section').classList.add('d-none');
+    document.getElementById('adopt-progress-section').classList.remove('d-none');
+    document.getElementById('adopt-footer').innerHTML = '';
+
+    const bar = document.getElementById('adopt-progress-bar');
+    const text = document.getElementById('adopt-progress-text');
+    const log = document.getElementById('adopt-log');
+    text.textContent = `Adoption de ${valid.length} device(s)...`;
+    bar.style.width = '10%';
+    log.innerHTML = '';
+
+    try {
+        const resp = await fetch('/api/devices/bulk-adopt', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ entries: valid }),
+        });
+        const data = await resp.json();
+        bar.style.width = '100%';
+        bar.classList.remove('progress-bar-animated');
+
+        if (data.error) {
+            bar.classList.add('bg-danger');
+            text.textContent = 'Erreur';
+            log.innerHTML = `<div class="text-danger">${escapeHtml(data.error)}</div>`;
+        } else {
+            const results = data.results || [];
+            let ok = 0;
+            results.forEach(r => {
+                if (r.success) ok++;
+                const lbl = r.label ? ` (${escapeHtml(r.label)})` : '';
+                log.innerHTML += `<div class="${r.success ? 'text-success' : 'text-danger'}">
+                    ${r.success ? '&#10003;' : '&#10007;'}
+                    <strong>${escapeHtml(r.key)}</strong>${lbl}
+                    → site <code>${escapeHtml(r.site_id)}</code>
+                    — ${r.success ? 'Adopte' : escapeHtml(r.msg || 'Echec')}
+                </div>`;
+                log.scrollTop = log.scrollHeight;
+            });
+            bar.classList.add(ok === results.length ? 'bg-success' : ok > 0 ? 'bg-warning' : 'bg-danger');
+            text.textContent = `Termine : ${ok}/${results.length} device(s) adopte(s)`;
+        }
+    } catch (err) {
+        bar.style.width = '100%';
+        bar.classList.add('bg-danger');
+        text.textContent = 'Erreur reseau';
+        log.innerHTML = `<div class="text-danger">${escapeHtml(err.message)}</div>`;
+    }
+
+    document.getElementById('adopt-footer').innerHTML = `
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" onclick="loadSites()">
+            <i class="bi bi-x-lg"></i> Fermer
+        </button>`;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Export devices CSV
+// ═══════════════════════════════════════════════════════════════════════════
+
+let exportDevices = [];
+
+function showExportModal() {
+    exportDevices = [];
+    document.getElementById('export-idle-section').classList.remove('d-none');
+    document.getElementById('export-progress-section').classList.add('d-none');
+    document.getElementById('export-result-section').classList.add('d-none');
+    document.getElementById('export-error').classList.add('d-none');
+    document.getElementById('export-footer').innerHTML = `
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+        <button type="button" class="btn btn-secondary" id="export-run-btn" onclick="executeExport()">
+            <i class="bi bi-search"></i> Lancer l'export
+        </button>`;
+    new bootstrap.Modal(document.getElementById('exportModal')).show();
+}
+
+async function executeExport() {
+    document.getElementById('export-idle-section').classList.add('d-none');
+    document.getElementById('export-progress-section').classList.remove('d-none');
+    document.getElementById('export-error').classList.add('d-none');
+    document.getElementById('export-footer').innerHTML = '';
+
+    try {
+        const resp = await fetch('/api/export/devices');
+        if (resp.status === 401) { window.location.href = '/'; return; }
+        const data = await resp.json();
+
+        if (data.error) {
+            document.getElementById('export-progress-section').classList.add('d-none');
+            document.getElementById('export-error').textContent = data.error;
+            document.getElementById('export-error').classList.remove('d-none');
+            document.getElementById('export-footer').innerHTML =
+                `<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fermer</button>`;
+            return;
+        }
+
+        exportDevices = data.devices || [];
+        document.getElementById('export-progress-section').classList.add('d-none');
+        document.getElementById('export-result-section').classList.remove('d-none');
+
+        const hasKey    = exportDevices.some(d => d.adopt_key);
+        const hasSerial = exportDevices.some(d => d.serial);
+        document.getElementById('export-summary').innerHTML =
+            `<i class="bi bi-check-circle"></i> <strong>${exportDevices.length}</strong> équipement(s) trouvé(s) — ` +
+            `Série : ${hasSerial ? '<span class="text-success">✓ disponible</span>' : '<span class="text-warning">non retourné</span>'}` +
+            ` &nbsp;|&nbsp; Device Key : ${hasKey ? '<span class="text-success">✓ disponible</span>' : '<span class="text-warning">non retourné par le contrôleur</span>'}`;
+
+        const tbody = document.getElementById('export-tbody');
+        tbody.innerHTML = '';
+        exportDevices.forEach(d => {
+            const keyBadge = d.adopt_key
+                ? `<code class="small text-success">${escapeHtml(d.adopt_key)}</code>`
+                : `<span class="text-muted small">—</span>`;
+            const serialBadge = d.serial
+                ? `<code class="small">${escapeHtml(d.serial)}</code>`
+                : `<span class="text-muted small">—</span>`;
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td class="small">${escapeHtml(d.site_name)}${d.customer_name ? `<br><span class="text-muted">${escapeHtml(d.customer_name)}</span>` : ''}</td>
+                <td>${escapeHtml(d.name || '-')}</td>
+                <td><span class="badge bg-light text-dark">${escapeHtml(d.model || '-')}</span></td>
+                <td><code class="small">${escapeHtml(d.mac || '-')}</code></td>
+                <td>${serialBadge}</td>
+                <td>${keyBadge}</td>
+                <td class="small">${escapeHtml(d.ip || '-')}</td>
+                <td><code class="small text-muted">${escapeHtml(d.site_id || '-')}</code></td>`;
+            tbody.appendChild(tr);
+        });
+
+        document.getElementById('export-footer').innerHTML = `
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fermer</button>
+            <button type="button" class="btn btn-outline-secondary" onclick="downloadExportCsv()" title="Export complet avec tous les champs">
+                <i class="bi bi-file-earmark-spreadsheet"></i> CSV complet
+            </button>
+            <button type="button" class="btn btn-success" onclick="downloadImportCsv()" title="Format compatible avec l'import Adopter devices">
+                <i class="bi bi-recycle"></i> CSV pour réimport
+            </button>`;
+    } catch (err) {
+        document.getElementById('export-progress-section').classList.add('d-none');
+        document.getElementById('export-error').textContent = err.message;
+        document.getElementById('export-error').classList.remove('d-none');
+        document.getElementById('export-footer').innerHTML =
+            `<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fermer</button>`;
+    }
+}
+
+function downloadExportCsv() {
+    if (!exportDevices.length) return;
+    const cols = ['site_name', 'customer_name', 'name', 'model', 'mac', 'serial', 'adopt_key', 'ip', 'firmware', 'site_id'];
+    const header = 'site_name,customer_name,name,model,mac,serial,adopt_key,ip,firmware,site_id';
+    const rows = exportDevices.map(d =>
+        cols.map(c => `"${(d[c] || '').toString().replace(/"/g, '""')}"`).join(',')
+    );
+    const csv = [header, ...rows].join('\r\n');
+    const a = document.createElement('a');
+    a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+    a.download = `omada_devices_complet_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+}
+
+function downloadImportCsv() {
+    if (!exportDevices.length) return;
+    // Format compatible avec l'import "Adopter devices" : site_id,device_key,mac,label
+    // On inclut aussi serial et site_name en colonnes supplémentaires (lecture seule / référence)
+    const header = 'site_id,device_key,mac,label,serial,site_name';
+    const rows = exportDevices.map(d => {
+        const fields = [
+            d.site_id    || '',
+            d.adopt_key  || '',
+            d.mac        || '',
+            d.name       || '',
+            d.serial     || '',
+            d.site_name  || '',
+        ];
+        return fields.map(v => `"${v.toString().replace(/"/g, '""')}"`).join(',');
+    });
+    const csv = [header, ...rows].join('\r\n');
+    const a = document.createElement('a');
+    a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+    a.download = `omada_devices_reimport_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 loadSites();
 </script>
 {% endblock %}

@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
-import json
 import os
 import secrets
-import sqlite3
 import time
 import urllib3
 from datetime import timedelta
-from urllib.parse import urlparse
 
 import bcrypt
 import requests as http_requests
@@ -26,179 +23,38 @@ from flask import (
     session,
     url_for,
 )
+
+from config import CREDENTIALS_FILE, DB_FILE
+from db import (
+    get_db,
+    get_smtp_config,
+    init_db,
+    load_credentials,
+    save_credentials,
+    send_reset_email,
+    smtp_is_configured,
+)
+
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY") or secrets.token_hex(32)
 app.permanent_session_lifetime = timedelta(
     seconds=int(os.environ.get("SESSION_LIFETIME", 28800))
 )
 
-# ---------------------------------------------------------------------------
-# Brute-force protection (en mémoire)
-# ---------------------------------------------------------------------------
-_login_attempts: dict[str, list[float]] = {}  # ip -> liste de timestamps
-_MAX_ATTEMPTS = 5
-_LOCKOUT_SECONDS = 300  # 5 minutes
-
 # Routes publiques exemptées de la vérification app_authenticated
-_PUBLIC_ROUTES = {"app_login_page", "app_register_page", "app_forgot_password", "app_reset_password", "app_logout", "static"}
-
-CREDENTIALS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".omada-credentials.json")
-DB_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "users.db")
-
-
-# ---------------------------------------------------------------------------
-# Database helpers
-# ---------------------------------------------------------------------------
-
-def get_db():
-    if "db" not in g:
-        g.db = sqlite3.connect(DB_FILE)
-        g.db.row_factory = sqlite3.Row
-    return g.db
-
-
-def init_db():
-    """Create tables and migrate existing JSON credentials on first run."""
-    conn = sqlite3.connect(DB_FILE)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            password_hash TEXT NOT NULL,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS controllers (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            label TEXT DEFAULT '',
-            mode TEXT DEFAULT 'msp',
-            base_url TEXT DEFAULT '',
-            omadac_id TEXT DEFAULT '',
-            client_id TEXT DEFAULT '',
-            client_secret TEXT DEFAULT '',
-            ac_client_id TEXT DEFAULT '',
-            ac_client_secret TEXT DEFAULT '',
-            omada_username TEXT DEFAULT '',
-            omada_password TEXT DEFAULT '',
-            customer_apps TEXT DEFAULT '{}',
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-        )
-    """)
-    # New tables
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS app_settings (
-            key   TEXT PRIMARY KEY,
-            value TEXT NOT NULL DEFAULT ''
-        )
-    """)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS password_resets (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id    INTEGER NOT NULL,
-            code       TEXT NOT NULL,
-            expires_at REAL NOT NULL,
-            used       INTEGER DEFAULT 0,
-            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-        )
-    """)
-    # Add email column to users if missing (safe on existing DBs)
-    try:
-        conn.execute("ALTER TABLE users ADD COLUMN email TEXT DEFAULT ''")
-    except Exception:
-        pass
-    conn.commit()
-    # Auto-migrate: if no users exist and env vars are set, create admin + import profiles
-    if conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0:
-        env_user = os.environ.get("APP_USERNAME", "")
-        env_hash = os.environ.get("APP_PASSWORD_HASH", "")
-        if env_user and env_hash:
-            conn.execute(
-                "INSERT INTO users (username, password_hash) VALUES (?, ?)",
-                (env_user, env_hash),
-            )
-            conn.commit()
-            uid = conn.execute("SELECT id FROM users WHERE username=?", (env_user,)).fetchone()[0]
-            try:
-                with open(CREDENTIALS_FILE) as f:
-                    profiles = json.load(f)
-                if isinstance(profiles, dict):
-                    profiles = [profiles] if profiles.get("base_url") else []
-                for p in profiles:
-                    ca = json.dumps(p.get("customer_apps") or {})
-                    conn.execute(
-                        """INSERT INTO controllers
-                           (user_id, label, mode, base_url, omadac_id, client_id,
-                            client_secret, ac_client_id, ac_client_secret,
-                            omada_username, omada_password, customer_apps)
-                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-                        (uid, p.get("label", ""), p.get("mode", "msp"), p.get("base_url", ""),
-                         p.get("omadac_id", ""), p.get("client_id", ""), p.get("client_secret", ""),
-                         p.get("ac_client_id", ""), p.get("ac_client_secret", ""),
-                         p.get("username", ""), p.get("password", ""), ca),
-                    )
-                conn.commit()
-            except Exception:
-                pass
-    conn.close()
-
+# Les routes auth sont dans le blueprint "auth" (préfixe "auth.")
+_PUBLIC_ROUTES = {
+    "auth.app_login_page", "auth.app_register_page",
+    "auth.app_forgot_password", "auth.app_reset_password",
+    "auth.app_logout", "static",
+}
 
 # ---------------------------------------------------------------------------
-# SMTP helpers
+# Blueprints
 # ---------------------------------------------------------------------------
+from blueprints.auth import auth_bp  # noqa: E402
+app.register_blueprint(auth_bp)
 
-def get_smtp_config():
-    """Return SMTP config dict from app_settings, or {} if not configured."""
-    try:
-        rows = get_db().execute("SELECT key, value FROM app_settings").fetchall()
-        return {r[0]: r[1] for r in rows}
-    except Exception:
-        return {}
-
-
-def smtp_is_configured():
-    cfg = get_smtp_config()
-    return bool(cfg.get("smtp_host") and cfg.get("smtp_user"))
-
-
-def send_reset_email(to_email, code):
-    """Send a password-reset code by email. Returns True on success."""
-    import smtplib
-    from email.mime.text import MIMEText
-    cfg = get_smtp_config()
-    host     = cfg.get("smtp_host", "")
-    port     = int(cfg.get("smtp_port", 587))
-    user     = cfg.get("smtp_user", "")
-    password = cfg.get("smtp_password", "")
-    from_addr = cfg.get("smtp_from") or user
-    use_tls  = cfg.get("smtp_tls", "1") not in ("0", "false", "False", "")
-    body = (
-        f"Bonjour,\n\n"
-        f"Votre code de réinitialisation de mot de passe est :\n\n"
-        f"    {code}\n\n"
-        f"Ce code est valable 15 minutes.\n\n"
-        f"Si vous n'avez pas demandé ce code, ignorez cet email.\n\n"
-        f"— Omada API Hub"
-    )
-    msg = MIMEText(body, "plain", "utf-8")
-    msg["Subject"] = "Réinitialisation de mot de passe — Omada API Hub"
-    msg["From"]    = from_addr
-    msg["To"]      = to_email
-    try:
-        if port == 465:
-            srv = smtplib.SMTP_SSL(host, port, timeout=10)
-        else:
-            srv = smtplib.SMTP(host, port, timeout=10)
-            if use_tls:
-                srv.starttls()
-        srv.login(user, password)
-        srv.sendmail(from_addr, [to_email], msg.as_string())
-        srv.quit()
-        return True
-    except Exception:
-        return False
 
 
 # ---------------------------------------------------------------------------
@@ -224,6 +80,16 @@ def omada_id():
 def is_customer_mode():
     """Check if current session is in Customer mode (vs MSP)."""
     return session.get("mode") == "customer"
+
+
+def is_standard_mode():
+    """Check if current session is in Standard controller mode (non-MSP)."""
+    return session.get("mode") == "standard"
+
+
+def is_direct_site_mode():
+    """True when sites are accessible directly (customer or standard mode)."""
+    return is_customer_mode() or is_standard_mode()
 
 
 def msp(path=""):
@@ -301,6 +167,19 @@ def require_customer_mode(f):
     return decorated
 
 
+def require_direct_site_mode(f):
+    """Allow access in Customer mode or Standard controller mode."""
+    from functools import wraps
+
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not is_direct_site_mode():
+            return jsonify({"error": "Disponible uniquement en mode Client ou Standard"}), 403
+        return f(*args, **kwargs)
+
+    return decorated
+
+
 def require_app_login(f):
     from functools import wraps
 
@@ -309,45 +188,10 @@ def require_app_login(f):
         if not session.get("app_authenticated"):
             if request.path.startswith("/api/"):
                 return jsonify({"error": "Acces refuse"}), 401
-            return redirect(url_for("app_login_page", next=request.path))
+            return redirect(url_for("auth.app_login_page", next=request.path))
         return f(*args, **kwargs)
 
     return decorated
-
-
-def _is_locked_out(ip: str) -> bool:
-    now = time.time()
-    attempts = [t for t in _login_attempts.get(ip, []) if now - t < _LOCKOUT_SECONDS]
-    _login_attempts[ip] = attempts
-    return len(attempts) >= _MAX_ATTEMPTS
-
-
-def _record_attempt(ip: str):
-    _login_attempts.setdefault(ip, []).append(time.time())
-
-
-def _clear_attempts(ip: str):
-    _login_attempts.pop(ip, None)
-
-
-def _get_client_ip() -> str:
-    """Retourne l'IP réelle du client en tenant compte des reverse proxies."""
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        # Prendre la première IP de la chaîne (la plus proche du client)
-        return forwarded.split(",")[0].strip()
-    return request.remote_addr or "unknown"
-
-
-def _safe_redirect_url(next_url: str, fallback: str) -> str:
-    """Valide que next_url est une URL relative (même hôte) pour éviter l'open redirect."""
-    if not next_url:
-        return fallback
-    parsed = urlparse(next_url)
-    # Refuser tout ce qui a un scheme ou un netloc (URL absolue)
-    if parsed.scheme or parsed.netloc:
-        return fallback
-    return next_url
 
 
 def refresh_token_if_needed():
@@ -546,45 +390,6 @@ def omada_delete_authcode(path):
     )
 
 
-def save_credentials(data):
-    """Save controller profiles for the current user."""
-    uid = session.get("user_id")
-    if not uid:
-        return
-    db = get_db()
-    db.execute("DELETE FROM controllers WHERE user_id=?", (uid,))
-    for p in data:
-        ca = json.dumps(p.get("customer_apps") or {})
-        db.execute(
-            """INSERT INTO controllers
-               (user_id, label, mode, base_url, omadac_id, client_id,
-                client_secret, ac_client_id, ac_client_secret,
-                omada_username, omada_password, customer_apps)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (uid, p.get("label", ""), p.get("mode", "msp"), p.get("base_url", ""),
-             p.get("omadac_id", ""), p.get("client_id", ""), p.get("client_secret", ""),
-             p.get("ac_client_id", ""), p.get("ac_client_secret", ""),
-             p.get("username", ""), p.get("password", ""), ca),
-        )
-    db.commit()
-
-
-def load_credentials():
-    """Load controller profiles for the current user."""
-    uid = session.get("user_id")
-    if not uid:
-        return []
-    rows = get_db().execute(
-        "SELECT * FROM controllers WHERE user_id=? ORDER BY id", (uid,)
-    ).fetchall()
-    result = []
-    for r in rows:
-        p = dict(r)
-        p["username"] = p.pop("omada_username", "")
-        p["password"] = p.pop("omada_password", "")
-        p["customer_apps"] = json.loads(p.get("customer_apps") or "{}")
-        result.append(p)
-    return result
 
 
 # ---------------------------------------------------------------------------
@@ -598,7 +403,7 @@ def enforce_app_login():
     if not session.get("app_authenticated") or not session.get("user_id"):
         if request.path.startswith("/api/"):
             return jsonify({"error": "Acces refuse"}), 401
-        return redirect(url_for("app_login_page", next=request.path))
+        return redirect(url_for("auth.app_login_page", next=request.path))
 
 
 # ---------------------------------------------------------------------------
@@ -607,9 +412,12 @@ def enforce_app_login():
 
 @app.context_processor
 def inject_mode():
+    mode = session.get("mode", "msp")
     return {
-        "profile_mode": session.get("mode", "msp"),
-        "is_customer_mode": session.get("mode") == "customer",
+        "profile_mode": mode,
+        "is_customer_mode": mode == "customer",
+        "is_standard_mode": mode == "standard",
+        "is_direct_site_mode": mode in ("customer", "standard"),
         "customer_name": session.get("customer_name", ""),
         "controller_id": session.get("omadac_id", ""),
         "app_username": session.get("app_username", ""),
@@ -620,274 +428,6 @@ def inject_mode():
     }
 
 
-# ---------------------------------------------------------------------------
-# App authentication
-# ---------------------------------------------------------------------------
-
-@app.route("/login", methods=["GET", "POST"])
-def app_login_page():
-    if session.get("app_authenticated"):
-        return redirect(url_for("login_page"))
-
-    error = None
-
-    if request.method == "POST":
-        ip = _get_client_ip()
-
-        if _is_locked_out(ip):
-            error = "Trop de tentatives. Réessayez dans 5 minutes."
-        else:
-            # Vérification CSRF
-            token_form = request.form.get("csrf_token", "")
-            token_session = session.get("csrf_token", "")
-            if not token_form or not token_session or not secrets.compare_digest(token_form, token_session):
-                error = "Requête invalide. Veuillez réessayer."
-            else:
-                username = request.form.get("username", "").strip()
-                password = request.form.get("password", "")
-
-                valid = False
-                user_id = None
-                db = sqlite3.connect(DB_FILE)
-                row = db.execute(
-                    "SELECT id, password_hash FROM users WHERE username=?", (username,)
-                ).fetchone()
-                db.close()
-                if row:
-                    try:
-                        valid = bcrypt.checkpw(password.encode(), row[1].encode())
-                        if valid:
-                            user_id = row[0]
-                    except Exception:
-                        valid = False
-
-                if valid and user_id:
-                    _clear_attempts(ip)
-                    session.permanent = True
-                    session["app_authenticated"] = True
-                    session["user_id"] = user_id
-                    session["app_username"] = username
-                    next_url = _safe_redirect_url(
-                        request.form.get("next", ""), url_for("login_page")
-                    )
-                    return redirect(next_url)
-                else:
-                    _record_attempt(ip)
-                    remaining = _MAX_ATTEMPTS - len(_login_attempts.get(ip, []))
-                    if remaining > 0:
-                        error = f"Identifiants incorrects. {remaining} tentative(s) restante(s)."
-                    else:
-                        error = "Trop de tentatives. Réessayez dans 5 minutes."
-
-    # Génère ou renouvelle le token CSRF pour ce formulaire
-    if "csrf_token" not in session:
-        session["csrf_token"] = secrets.token_hex(32)
-    next_url = _safe_redirect_url(request.args.get("next", ""), "")
-    return render_template("app_login.html", error=error, next=next_url,
-                           csrf_token=session["csrf_token"])
-
-
-@app.route("/app-logout")
-def app_logout():
-    session.clear()
-    return redirect(url_for("app_login_page"))
-
-
-@app.route("/register", methods=["GET", "POST"])
-def app_register_page():
-    if session.get("app_authenticated"):
-        return redirect(url_for("login_page"))
-
-    error = None
-    success = None
-    if "csrf_token" not in session:
-        session["csrf_token"] = secrets.token_hex(32)
-
-    if request.method == "POST":
-        token_form = request.form.get("csrf_token", "")
-        token_session = session.get("csrf_token", "")
-        if not token_form or not token_session or not secrets.compare_digest(token_form, token_session):
-            error = "Requête invalide. Veuillez réessayer."
-        else:
-            username = request.form.get("username", "").strip()
-            password = request.form.get("password", "")
-            confirm  = request.form.get("confirm_password", "")
-            email    = request.form.get("email", "").strip().lower()
-            if not username or not password:
-                error = "Nom d'utilisateur et mot de passe requis."
-            elif len(username) < 3:
-                error = "Nom d'utilisateur trop court (3 caractères minimum)."
-            elif len(password) < 8:
-                error = "Mot de passe trop court (8 caractères minimum)."
-            elif password != confirm:
-                error = "Les mots de passe ne correspondent pas."
-            elif email and "@" not in email:
-                error = "Adresse email invalide."
-            else:
-                pw_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
-                try:
-                    db = sqlite3.connect(DB_FILE)
-                    db.execute(
-                        "INSERT INTO users (username, password_hash, email) VALUES (?, ?, ?)",
-                        (username, pw_hash, email),
-                    )
-                    db.commit()
-                    db.close()
-                    success = "Compte créé avec succès. Vous pouvez vous connecter."
-                except sqlite3.IntegrityError:
-                    error = "Ce nom d'utilisateur est déjà pris."
-
-    return render_template(
-        "register.html",
-        error=error,
-        success=success,
-        csrf_token=session["csrf_token"],
-    )
-
-
-# ---------------------------------------------------------------------------
-# Password reset
-# ---------------------------------------------------------------------------
-
-@app.route("/forgot-password", methods=["GET", "POST"])
-def app_forgot_password():
-    if session.get("app_authenticated"):
-        return redirect(url_for("login_page"))
-    if "csrf_token" not in session:
-        session["csrf_token"] = secrets.token_hex(32)
-
-    error = None
-    info  = None
-
-    if request.method == "POST":
-        ip = _get_client_ip()
-        if _is_locked_out(ip):
-            error = "Trop de tentatives. Réessayez dans 5 minutes."
-        else:
-            token_form    = request.form.get("csrf_token", "")
-            token_session = session.get("csrf_token", "")
-            if not token_form or not token_session or not secrets.compare_digest(token_form, token_session):
-                error = "Requête invalide. Veuillez réessayer."
-            else:
-                username = request.form.get("username", "").strip()
-                email    = request.form.get("email", "").strip().lower()
-                db = sqlite3.connect(DB_FILE)
-                row = db.execute(
-                    "SELECT id, email FROM users WHERE username=?", (username,)
-                ).fetchone()
-                db.close()
-                match = row and row[1] and row[1].lower() == email
-
-                if match:
-                    _clear_attempts(ip)
-                    if smtp_is_configured():
-                        # Generate 6-digit code, store in DB, send by email
-                        code = f"{secrets.randbelow(1_000_000):06d}"
-                        expires = time.time() + 900
-                        db2 = sqlite3.connect(DB_FILE)
-                        db2.execute("DELETE FROM password_resets WHERE user_id=?", (row[0],))
-                        db2.execute(
-                            "INSERT INTO password_resets (user_id, code, expires_at) VALUES (?,?,?)",
-                            (row[0], code, expires),
-                        )
-                        db2.commit()
-                        db2.close()
-                        send_reset_email(email, code)
-                        session["reset_uid"]  = row[0]
-                        session["reset_smtp"] = True
-                    else:
-                        session["reset_uid"]  = row[0]
-                        session["reset_smtp"] = False
-                    return redirect(url_for("app_reset_password"))
-                else:
-                    _record_attempt(ip)
-                    # Neutral message to avoid account enumeration
-                    info = "Si ce compte existe et que l'email correspond, vous pouvez réinitialiser votre mot de passe."
-
-    return render_template(
-        "forgot_password.html",
-        error=error,
-        info=info,
-        csrf_token=session["csrf_token"],
-        smtp_active=smtp_is_configured(),
-    )
-
-
-@app.route("/reset-password", methods=["GET", "POST"])
-def app_reset_password():
-    if session.get("app_authenticated"):
-        return redirect(url_for("login_page"))
-    if "reset_uid" not in session:
-        return redirect(url_for("app_forgot_password"))
-    if "csrf_token" not in session:
-        session["csrf_token"] = secrets.token_hex(32)
-
-    uid       = session["reset_uid"]
-    use_smtp  = session.get("reset_smtp", False)
-    code_ok   = session.get("reset_code_ok", False)
-    error     = None
-
-    # Step A (SMTP only): verify code
-    if use_smtp and not code_ok and request.method == "POST":
-        token_form    = request.form.get("csrf_token", "")
-        token_session = session.get("csrf_token", "")
-        if not token_form or not secrets.compare_digest(token_form, token_session):
-            error = "Requête invalide."
-        else:
-            submitted_code = request.form.get("code", "").strip()
-            db = sqlite3.connect(DB_FILE)
-            row = db.execute(
-                "SELECT id FROM password_resets WHERE user_id=? AND code=? AND used=0",
-                (uid, submitted_code),
-            ).fetchone()
-            if row:
-                expires = db.execute(
-                    "SELECT expires_at FROM password_resets WHERE id=?", (row[0],)
-                ).fetchone()
-                db.close()
-                if expires and time.time() < expires[0]:
-                    session["reset_code_ok"] = True
-                    code_ok = True
-                else:
-                    error = "Ce code a expiré. Recommencez depuis le début."
-                    session.pop("reset_uid", None)
-                    session.pop("reset_smtp", None)
-            else:
-                db.close()
-                error = "Code incorrect."
-
-    # Step B: set new password
-    elif (not use_smtp or code_ok) and request.method == "POST" and request.form.get("new_password"):
-        token_form    = request.form.get("csrf_token", "")
-        token_session = session.get("csrf_token", "")
-        if not token_form or not secrets.compare_digest(token_form, token_session):
-            error = "Requête invalide."
-        else:
-            new_pw  = request.form.get("new_password", "")
-            confirm = request.form.get("confirm_password", "")
-            if len(new_pw) < 8:
-                error = "Mot de passe trop court (8 caractères minimum)."
-            elif new_pw != confirm:
-                error = "Les mots de passe ne correspondent pas."
-            else:
-                new_hash = bcrypt.hashpw(new_pw.encode(), bcrypt.gensalt()).decode()
-                db = sqlite3.connect(DB_FILE)
-                db.execute("UPDATE users SET password_hash=? WHERE id=?", (new_hash, uid))
-                db.execute("DELETE FROM password_resets WHERE user_id=?", (uid,))
-                db.commit()
-                db.close()
-                session.pop("reset_uid", None)
-                session.pop("reset_smtp", None)
-                session.pop("reset_code_ok", None)
-                return redirect(url_for("app_login_page"))
-
-    return render_template(
-        "reset_password.html",
-        error=error,
-        use_smtp=use_smtp,
-        code_ok=code_ok,
-        csrf_token=session["csrf_token"],
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -898,7 +438,7 @@ def app_reset_password():
 @require_app_login
 def login_page():
     if session.get("access_token"):
-        if is_customer_mode():
+        if is_direct_site_mode():
             return redirect(url_for("sites_page"))
         return redirect(url_for("customers_page"))
     return render_template("login.html")
@@ -909,6 +449,8 @@ def login_page():
 @require_auth
 def customers_page():
     """MSP view: list all customers. Entry point after MSP login."""
+    if is_standard_mode():
+        return redirect(url_for("sites_page"))
     return render_template("customers.html")
 
 
@@ -917,7 +459,7 @@ def customers_page():
 @require_auth
 def sites_page():
     # In MSP mode, user must pick a customer first
-    if not is_customer_mode():
+    if not is_direct_site_mode():
         return redirect(url_for("customers_page"))
     return render_template("sites.html")
 
@@ -926,7 +468,7 @@ def sites_page():
 @require_app_login
 @require_auth
 def create_site_page():
-    if not is_customer_mode():
+    if not is_direct_site_mode():
         return redirect(url_for("customers_page"))
     return render_template("create_site.html")
 
@@ -1317,7 +859,7 @@ def api_list_sites():
     page_size = 200
     while True:
         params = {"page": str(page), "pageSize": str(page_size)}
-        if is_customer_mode():
+        if is_direct_site_mode():
             resp = omada_get(std("/sites"), params)
         else:
             resp = omada_get(msp("/sites"), params)
@@ -1347,8 +889,8 @@ def api_list_sites():
 @require_auth
 def api_get_site(site_id):
     refresh_token_if_needed()
-    if is_customer_mode():
-        # Customer mode: direct endpoint
+    if is_direct_site_mode():
+        # Customer/Standard mode: direct endpoint
         resp = omada_get(std(f"/sites/{site_id}"))
         return jsonify(resp.json()), resp.status_code
     else:
@@ -1371,8 +913,8 @@ def api_create_site():
     body = request.get_json(silent=True) or {}
     import json as _json
     with open("/tmp/omada_single_create_req.json", "w") as f:
-        _json.dump({"customer_mode": is_customer_mode(), "url": f"{omada_base()}{std('/sites')}", "body": body}, f, indent=2)
-    if is_customer_mode():
+        _json.dump({"mode": session.get("mode"), "url": f"{omada_base()}{std('/sites')}", "body": body}, f, indent=2)
+    if is_direct_site_mode():
         resp = omada_post(std("/sites"), body)
     else:
         # Try MSP create, fallback to standard
@@ -1388,8 +930,8 @@ def api_create_site():
 @require_auth
 def api_delete_site(site_id):
     refresh_token_if_needed()
-    if is_customer_mode():
-        # Customer mode: direct delete
+    if is_direct_site_mode():
+        # Customer/Standard mode: direct delete
         resp = omada_delete(std(f"/sites/{site_id}"))
         return jsonify(resp.json()), resp.status_code
     else:
@@ -1536,8 +1078,8 @@ def api_list_devices(site_id):
         "page": request.args.get("page", "1"),
         "pageSize": request.args.get("pageSize", "1000"),
     }
-    if is_customer_mode():
-        # Customer mode: direct endpoint
+    if is_direct_site_mode():
+        # Customer/Standard mode: direct endpoint
         resp = omada_get(std(f"/sites/{site_id}/devices"), params)
         rdata = resp.json()
         if rdata.get("errorCode", -1) == 0:
@@ -1564,8 +1106,8 @@ def api_list_devices(site_id):
 @require_auth
 def api_forget_device(site_id, device_mac):
     refresh_token_if_needed()
-    if is_customer_mode():
-        # Customer mode: direct endpoint
+    if is_direct_site_mode():
+        # Customer/Standard mode: direct endpoint
         resp = omada_post(std(f"/sites/{site_id}/devices/{device_mac}/forget"))
         return jsonify(resp.json()), resp.status_code
     else:
@@ -1582,6 +1124,87 @@ def api_forget_device(site_id, device_mac):
         return jsonify(resp.json()), resp.status_code
 
 
+@app.route("/api/sites/<site_id>/forget-devices", methods=["POST"])
+@require_auth
+def api_forget_site_devices(site_id):
+    """Forget all devices of a site without deleting the site."""
+    refresh_token_if_needed()
+    oid = omada_id()
+    body = request.get_json(silent=True) or {}
+    customer_id = body.get("customerId", "")
+
+    if is_direct_site_mode():
+        resp = omada_get(std(f"/sites/{site_id}/devices"), {"page": "1", "pageSize": "1000"})
+        devices_data = []
+        try:
+            rdata = resp.json()
+            if rdata.get("errorCode", -1) == 0:
+                devices_data = (rdata.get("result") or {}).get("data") or []
+        except Exception:
+            pass
+
+        forget_results = []
+        for device in devices_data:
+            mac = device.get("mac", "")
+            if not mac:
+                continue
+            forget_resp = omada_post(std(f"/sites/{site_id}/devices/{mac}/forget"))
+            try:
+                forget_json = forget_resp.json()
+            except Exception:
+                forget_json = {}
+            forget_results.append({
+                "mac": mac, "name": device.get("name", mac),
+                "status": forget_resp.status_code, "response": forget_json,
+            })
+    else:
+        cid = customer_id if customer_id else oid
+
+        resp = omada_get(f"/openapi/v1/{cid}/sites/{site_id}/devices", {"page": "1", "pageSize": "1000"})
+        devices_data = []
+        try:
+            rdata = resp.json()
+            if rdata.get("errorCode", -1) == 0:
+                devices_data = (rdata.get("result") or {}).get("data") or []
+        except Exception:
+            pass
+
+        forget_results = []
+        for device in devices_data:
+            mac = device.get("mac", "")
+            if not mac:
+                continue
+            if customer_id:
+                forget_resp = omada_post(msp(f"/customers/{customer_id}/sites/{site_id}/devices/{mac}/forget"))
+                try:
+                    forget_json = forget_resp.json()
+                except Exception:
+                    forget_json = {}
+                if forget_json.get("errorCode", -1) != 0:
+                    forget_resp = omada_post(f"/openapi/v1/{cid}/sites/{site_id}/devices/{mac}/forget")
+                    try:
+                        forget_json = forget_resp.json()
+                    except Exception:
+                        forget_json = {}
+            else:
+                forget_resp = omada_post(f"/openapi/v1/{oid}/sites/{site_id}/devices/{mac}/forget")
+                try:
+                    forget_json = forget_resp.json()
+                except Exception:
+                    forget_json = {}
+            forget_results.append({
+                "mac": mac, "name": device.get("name", mac),
+                "status": forget_resp.status_code, "response": forget_json,
+            })
+
+    ok_count = sum(1 for r in forget_results if r.get("response", {}).get("errorCode", -1) == 0)
+    return jsonify({
+        "forget_results": forget_results,
+        "total": len(forget_results),
+        "ok": ok_count,
+    })
+
+
 @app.route("/api/sites/<site_id>/delete-with-forget", methods=["POST"])
 @require_auth
 def api_delete_site_with_forget(site_id):
@@ -1591,8 +1214,8 @@ def api_delete_site_with_forget(site_id):
     body = request.get_json(silent=True) or {}
     customer_id = body.get("customerId", "")
 
-    if is_customer_mode():
-        # --- Customer mode: everything is direct ---
+    if is_direct_site_mode():
+        # --- Customer/Standard mode: everything is direct ---
         # 1. Get devices
         resp = omada_get(std(f"/sites/{site_id}/devices"), {"page": "1", "pageSize": "1000"})
         devices_data = []
@@ -1698,7 +1321,7 @@ def api_delete_site_with_forget(site_id):
 
 @app.route("/api/sites/<site_id>/wan", methods=["GET"])
 @require_auth
-@require_customer_mode
+@require_direct_site_mode
 def api_get_wan(site_id):
     refresh_token_if_needed()
     # Try multiple known paths for WAN info
@@ -1747,7 +1370,7 @@ def api_get_wan(site_id):
 
 @app.route("/api/sites/<site_id>/wan", methods=["PUT"])
 @require_auth
-@require_customer_mode
+@require_direct_site_mode
 def api_update_wan(site_id):
     refresh_token_if_needed()
     body = request.get_json(silent=True) or {}
@@ -1766,7 +1389,7 @@ def api_update_wan(site_id):
 
 @app.route("/api/sites/<site_id>/wan/ports", methods=["GET"])
 @require_auth
-@require_customer_mode
+@require_direct_site_mode
 def api_get_wan_ports(site_id):
     """Return WAN port list from all site gateways using /gateways/{mac}/ports."""
     refresh_token_if_needed()
@@ -1864,7 +1487,7 @@ def api_get_wan_ports(site_id):
 
 @app.route("/api/sites/<site_id>/wan/debug", methods=["GET"])
 @require_auth
-@require_customer_mode
+@require_direct_site_mode
 def api_get_wan_debug(site_id):
     """Retourne la réponse brute de tous les gateways pour diagnostic WAN."""
     refresh_token_if_needed()
@@ -1978,7 +1601,7 @@ def api_get_wan_debug(site_id):
 
 @app.route("/api/sites/<site_id>/gateway", methods=["GET"])
 @require_auth
-@require_customer_mode
+@require_direct_site_mode
 def api_get_gateway(site_id):
     """Get gateway device details for this site."""
     refresh_token_if_needed()
@@ -2008,7 +1631,7 @@ def api_get_gateway(site_id):
 
 @app.route("/api/sites/<site_id>/vpn/wireguards", methods=["GET"])
 @require_auth
-@require_customer_mode
+@require_direct_site_mode
 def api_list_wireguards(site_id):
     refresh_token_if_needed()
     params = {"page": request.args.get("page", "1"), "pageSize": request.args.get("pageSize", "100")}
@@ -2018,7 +1641,7 @@ def api_list_wireguards(site_id):
 
 @app.route("/api/sites/<site_id>/vpn/wireguards/<wg_id>", methods=["PUT"])
 @require_auth
-@require_customer_mode
+@require_direct_site_mode
 def api_update_wireguard(site_id, wg_id):
     refresh_token_if_needed()
     body = request.get_json(silent=True) or {}
@@ -2028,7 +1651,7 @@ def api_update_wireguard(site_id, wg_id):
 
 @app.route("/api/sites/<site_id>/vpn/wireguards/<wg_id>", methods=["DELETE"])
 @require_auth
-@require_customer_mode
+@require_direct_site_mode
 def api_delete_wireguard(site_id, wg_id):
     refresh_token_if_needed()
     resp = omada_delete(std(f"/sites/{site_id}/vpn/wireguards/{wg_id}"))
@@ -2037,7 +1660,7 @@ def api_delete_wireguard(site_id, wg_id):
 
 @app.route("/api/sites/<site_id>/vpn/wireguard-peers", methods=["GET"])
 @require_auth
-@require_customer_mode
+@require_direct_site_mode
 def api_list_wireguard_peers(site_id):
     refresh_token_if_needed()
     params = {"page": request.args.get("page", "1"), "pageSize": request.args.get("pageSize", "100")}
@@ -2047,7 +1670,7 @@ def api_list_wireguard_peers(site_id):
 
 @app.route("/api/sites/<site_id>/vpn/wireguard-peers/<peer_id>", methods=["PUT"])
 @require_auth
-@require_customer_mode
+@require_direct_site_mode
 def api_update_wireguard_peer(site_id, peer_id):
     refresh_token_if_needed()
     body = request.get_json(silent=True) or {}
@@ -2071,7 +1694,7 @@ def omada_patch(path, body=None):
 
 @app.route("/api/sites/<site_id>/wifi/ssids", methods=["GET"])
 @require_auth
-@require_customer_mode
+@require_direct_site_mode
 def api_list_ssids(site_id):
     """List all SSIDs: first get WLAN groups, then SSIDs per group."""
     refresh_token_if_needed()
@@ -2117,7 +1740,7 @@ def api_list_ssids(site_id):
 
 @app.route("/api/sites/<site_id>/wifi/ssids/<wlan_id>/<ssid_id>", methods=["GET"])
 @require_auth
-@require_customer_mode
+@require_direct_site_mode
 def api_get_ssid(site_id, wlan_id, ssid_id):
     refresh_token_if_needed()
     resp = omada_get(std(f"/sites/{site_id}/wireless-network/wlans/{wlan_id}/ssids/{ssid_id}"))
@@ -2126,7 +1749,7 @@ def api_get_ssid(site_id, wlan_id, ssid_id):
 
 @app.route("/api/sites/<site_id>/wifi/ssids/<wlan_id>/<ssid_id>", methods=["PATCH"])
 @require_auth
-@require_customer_mode
+@require_direct_site_mode
 def api_update_ssid(site_id, wlan_id, ssid_id):
     refresh_token_if_needed()
     body = request.get_json(silent=True) or {}
@@ -2174,7 +1797,7 @@ def api_update_ssid(site_id, wlan_id, ssid_id):
 
 @app.route("/api/site-defaults", methods=["GET"])
 @require_auth
-@require_customer_mode
+@require_direct_site_mode
 def api_site_defaults():
     """Get default values for site creation from an existing site."""
     refresh_token_if_needed()
@@ -2202,7 +1825,7 @@ def api_site_defaults():
 
 @app.route("/api/sites/bulk-create", methods=["POST"])
 @require_auth
-@require_customer_mode
+@require_direct_site_mode
 def api_bulk_create_sites():
     """Create multiple sites with incremental names."""
     refresh_token_if_needed()
@@ -2246,6 +1869,201 @@ def api_bulk_create_sites():
         })
 
     return jsonify({"results": results})
+
+
+# ---------------------------------------------------------------------------
+# API : Device adoption (Standard / Customer mode)
+# ---------------------------------------------------------------------------
+
+@app.route("/api/sites/<site_id>/devices/adopt", methods=["POST"])
+@require_auth
+@require_direct_site_mode
+def api_adopt_device(site_id):
+    """Adopt a single device into a site via device key.
+    Body: {"key": "XXXX-XXXX-XXXX", "mac": "AA:BB:CC:DD:EE:FF"}  (mac optional)
+    Tries multiple Omada API paths since it varies by firmware version.
+    """
+    refresh_token_if_needed()
+    body = request.get_json(silent=True) or {}
+    device_key = body.get("key", "").strip()
+    mac = body.get("mac", "").strip()
+
+    if not device_key:
+        return jsonify({"error": "Le champ 'key' (device key) est obligatoire"}), 400
+
+    adopt_body = {"key": device_key}
+    if mac:
+        adopt_body["mac"] = mac
+
+    # Try several known Omada API adoption endpoints (differs by version)
+    candidate_paths = [
+        std(f"/sites/{site_id}/cmd/adopt"),
+        std(f"/sites/{site_id}/devices"),
+        std(f"/sites/{site_id}/devices/adopt"),
+    ]
+
+    last_resp = None
+    for path in candidate_paths:
+        try:
+            resp = omada_post(path, adopt_body)
+            last_resp = resp
+            rdata = resp.json()
+            if rdata.get("errorCode", -1) == 0:
+                return jsonify(rdata), 200
+            # errorCode -1301 = device already adopted elsewhere, still return it
+        except Exception:
+            continue
+
+    if last_resp is not None:
+        try:
+            return jsonify(last_resp.json()), last_resp.status_code
+        except Exception:
+            pass
+    return jsonify({"error": "Echec adoption — aucun endpoint disponible"}), 502
+
+
+@app.route("/api/devices/bulk-adopt", methods=["POST"])
+@require_auth
+@require_direct_site_mode
+def api_bulk_adopt_devices():
+    """Adopt multiple devices across multiple sites from a list.
+    Body: {"entries": [{"site_id": "...", "key": "...", "mac": "...", "label": "..."}, ...]}
+    """
+    refresh_token_if_needed()
+    body = request.get_json(silent=True) or {}
+    entries = body.get("entries", [])
+
+    if not entries:
+        return jsonify({"error": "Aucune entree fournie"}), 400
+    if len(entries) > 500:
+        return jsonify({"error": "Maximum 500 devices par operation"}), 400
+
+    results = []
+    for entry in entries:
+        site_id = entry.get("site_id", "").strip()
+        device_key = entry.get("key", "").strip()
+        mac = entry.get("mac", "").strip()
+        label = entry.get("label", "").strip()
+
+        if not site_id or not device_key:
+            results.append({
+                "site_id": site_id, "key": device_key, "mac": mac, "label": label,
+                "success": False, "msg": "site_id et key sont obligatoires",
+            })
+            continue
+
+        adopt_body = {"key": device_key}
+        if mac:
+            adopt_body["mac"] = mac
+
+        candidate_paths = [
+            f"/openapi/v1/{omada_id()}/sites/{site_id}/cmd/adopt",
+            f"/openapi/v1/{omada_id()}/sites/{site_id}/devices",
+            f"/openapi/v1/{omada_id()}/sites/{site_id}/devices/adopt",
+        ]
+
+        success = False
+        msg = ""
+        for path in candidate_paths:
+            try:
+                resp = http_requests.post(
+                    f"{omada_base()}{path}",
+                    json=adopt_body,
+                    headers=omada_headers(),
+                    timeout=20,
+                    verify=False,
+                )
+                rdata = resp.json()
+                if rdata.get("errorCode", -1) == 0:
+                    success = True
+                    msg = "Adopte"
+                    break
+                else:
+                    msg = rdata.get("msg", f"Erreur code {rdata.get('errorCode')}")
+            except Exception as e:
+                msg = str(e)
+
+        results.append({
+            "site_id": site_id,
+            "key": device_key,
+            "mac": mac,
+            "label": label,
+            "success": success,
+            "msg": msg,
+        })
+
+    ok = sum(1 for r in results if r["success"])
+    return jsonify({"results": results, "total": len(results), "success": ok, "failed": len(results) - ok})
+
+
+# ---------------------------------------------------------------------------
+# API : Export devices (MAC / serial / adoptKey) across all sites
+# ---------------------------------------------------------------------------
+
+@app.route("/api/export/devices", methods=["GET"])
+@require_auth
+def api_export_devices():
+    """Collect all devices from all sites and return mac, serialNo, adoptKey, model, name, site."""
+    refresh_token_if_needed()
+    oid = omada_id()
+
+    # ── 1. Fetch all sites ───────────────────────────────────────────────────
+    all_sites = []
+    page = 1
+    while True:
+        params = {"page": str(page), "pageSize": "200"}
+        if is_direct_site_mode():
+            resp = omada_get(std("/sites"), params)
+        else:
+            resp = omada_get(msp("/sites"), params)
+        rdata = resp.json()
+        if rdata.get("errorCode", -1) != 0:
+            break
+        batch = (rdata.get("result") or {}).get("data") or []
+        all_sites.extend(batch)
+        total = (rdata.get("result") or {}).get("totalRows", 0)
+        if len(all_sites) >= total or not batch:
+            break
+        page += 1
+
+    # ── 2. For each site, fetch devices ──────────────────────────────────────
+    export = []
+    for site in all_sites:
+        site_id   = site.get("id") or site.get("siteId") or ""
+        site_name = site.get("name") or site.get("siteName") or ""
+        customer  = site.get("customerName") or ""
+        if not site_id:
+            continue
+        try:
+            if is_direct_site_mode():
+                resp = omada_get(std(f"/sites/{site_id}/devices"), {"page": "1", "pageSize": "1000"})
+            else:
+                customer_id = site.get("customerId") or ""
+                cid = customer_id if customer_id else oid
+                resp = omada_get(f"/openapi/v1/{cid}/sites/{site_id}/devices",
+                                 {"page": "1", "pageSize": "1000"})
+            rdata = resp.json()
+            if rdata.get("errorCode", -1) != 0:
+                continue
+            for dev in (rdata.get("result") or {}).get("data") or []:
+                export.append({
+                    "site_id":       site_id,
+                    "site_name":     site_name,
+                    "customer_name": customer,
+                    "name":          dev.get("name", ""),
+                    "mac":           dev.get("mac", ""),
+                    "model":         dev.get("model") or dev.get("modelName", ""),
+                    "serial":        dev.get("serialNo") or dev.get("sn", ""),
+                    "adopt_key":     dev.get("adoptKey") or dev.get("key", ""),
+                    "ip":            dev.get("ip", ""),
+                    "firmware":      dev.get("version") or dev.get("firmwareVersion", ""),
+                    "status":        dev.get("status", ""),
+                    "type":          dev.get("type", ""),
+                })
+        except Exception:
+            continue
+
+    return jsonify({"devices": export, "total": len(export)})
 
 
 # ---------------------------------------------------------------------------

@@ -38,7 +38,7 @@
 
             <!-- Logo + breadcrumb -->
             <div class="d-flex align-items-center gap-2 me-auto">
-                {% if is_customer_mode %}
+                {% if is_direct_site_mode %}
                 <a class="navbar-brand" href="{{ url_for('sites_page') }}">
                     <img src="/static/img/logo.svg" alt="" height="26" class="me-1" style="filter:brightness(0) invert(1); opacity:.9;"> Omada API Hub
                 </a>
@@ -59,6 +59,9 @@
                     <span class="breadcrumb-current">
                         <i class="bi bi-person-badge"></i> {{ customer_name }}
                     </span>
+                    {% elif is_standard_mode %}
+                    <span class="sep"><i class="bi bi-chevron-right"></i></span>
+                    <span class="badge" style="background:rgba(34,197,94,0.20); color:#4ade80; font-weight:600; font-size:0.7rem; letter-spacing:.05em;"><i class="bi bi-hdd-network"></i> Standard</span>
                     {% else %}
                     <span class="sep"><i class="bi bi-chevron-right"></i></span>
                     <span class="badge" style="background:rgba(234,179,8,0.20); color:#fbbf24; font-weight:600; font-size:0.7rem; letter-spacing:.05em;">MSP</span>
@@ -77,6 +80,8 @@
                     {% endif %}
                     {% if is_customer_mode %}
                     <span class="badge" style="background:rgba(34,211,238,0.18); color:#22d3ee; font-size:0.68rem;">Client</span>
+                    {% elif is_standard_mode %}
+                    <span class="badge" style="background:rgba(34,197,94,0.18); color:#4ade80; font-size:0.68rem;">Standard</span>
                     {% endif %}
                 </div>
 
@@ -133,7 +138,7 @@
                 </div>
                 <div class="modal-footer border-0 pt-0">
                     <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Annuler</button>
-                    <a href="{{ url_for('app_logout') }}" class="btn btn-sm btn-danger">
+                    <a href="{{ url_for('auth.app_logout') }}" class="btn btn-sm btn-danger">
                         <i class="bi bi-power me-1"></i> Déconnexion
                     </a>
                 </div>

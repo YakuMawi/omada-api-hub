@@ -7,7 +7,23 @@
             <div class="card-body p-4">
                 <div class="text-center mb-4">
                     <img src="/static/img/logo.svg" alt="Omada API Hub" height="60" class="mb-2">
-                    <p class="text-muted">Connexion au controleur MSP</p>
+                    <p class="text-muted" id="login-subtitle">Connexion au controleur</p>
+                </div>
+
+                <!-- Sélecteur de mode -->
+                <div class="mb-3">
+                    <label class="form-label fw-bold small"><i class="bi bi-hdd-network"></i> Type de controleur</label>
+                    <div class="btn-group w-100" role="group" id="mode-selector">
+                        <input type="radio" class="btn-check" name="controller_mode" id="mode_msp" value="msp" checked>
+                        <label class="btn btn-outline-primary btn-sm" for="mode_msp">
+                            <i class="bi bi-building"></i> MSP
+                        </label>
+                        <input type="radio" class="btn-check" name="controller_mode" id="mode_standard" value="standard">
+                        <label class="btn btn-outline-secondary btn-sm" for="mode_standard">
+                            <i class="bi bi-hdd-network"></i> Standard (non-MSP)
+                        </label>
+                    </div>
+                    <div class="form-text" id="mode-hint">Controleur MSP : gestion multi-clients avec section Clients</div>
                 </div>
 
                 <!-- Saved profiles dropdown -->
@@ -36,9 +52,10 @@
                                placeholder="https://10.50.10.104:8043" required>
                     </div>
                     <div class="mb-3">
-                        <label for="omadac_id" class="form-label">Omada ID (MSP ID)</label>
+                        <label for="omadac_id" class="form-label" id="omadac-id-label">Omada Controller ID</label>
                         <input type="text" class="form-control" id="omadac_id" name="omadac_id"
-                               placeholder="Identifiant du controleur MSP" required>
+                               placeholder="Identifiant du controleur" required>
+                        <div class="form-text" id="omadac-id-hint">Visible dans Settings &gt; Controller Info du controleur</div>
                     </div>
 
                     <!-- Section 1: Client Credentials App -->
@@ -62,8 +79,8 @@
                         </div>
                     </div>
 
-                    <!-- Section 2: Authorization Code App -->
-                    <div class="card bg-light mb-3">
+                    <!-- Section 2: Authorization Code App (MSP only) -->
+                    <div class="card bg-light mb-3" id="authcode-section">
                         <div class="card-body py-2 px-3">
                             <p class="fw-bold mb-1">
                                 <i class="bi bi-shield-lock text-success"></i> App Authorization Code
@@ -118,6 +135,44 @@
 let savedProfiles = [];
 const ALL_FIELDS = ['label','base_url','omadac_id','client_id','client_secret','ac_client_id','ac_client_secret','username','password'];
 
+// ── Mode selector ─────────────────────────────────────────────────────────────
+function getSelectedMode() {
+    const el = document.querySelector('input[name="controller_mode"]:checked');
+    return el ? el.value : 'msp';
+}
+
+function applyModeUI(mode) {
+    const authSection = document.getElementById('authcode-section');
+    const hint = document.getElementById('mode-hint');
+    const idLabel = document.getElementById('omadac-id-label');
+    const idHint = document.getElementById('omadac-id-hint');
+    const subtitle = document.getElementById('login-subtitle');
+    if (mode === 'standard') {
+        authSection.classList.add('d-none');
+        hint.textContent = 'Controleur Standard : acces direct a tous les sites, pas de section Clients';
+        idLabel.textContent = 'Omada Controller ID';
+        idHint.textContent = 'Visible dans Settings > Controller Info du controleur';
+        subtitle.textContent = 'Connexion au controleur Standard (non-MSP)';
+    } else {
+        authSection.classList.remove('d-none');
+        hint.textContent = 'Controleur MSP : gestion multi-clients avec section Clients';
+        idLabel.textContent = 'Omada ID (MSP ID)';
+        idHint.textContent = 'Identifiant MSP visible dans le controleur';
+        subtitle.textContent = 'Connexion au controleur MSP';
+    }
+}
+
+document.querySelectorAll('input[name="controller_mode"]').forEach(radio => {
+    radio.addEventListener('change', () => {
+        applyModeUI(getSelectedMode());
+        // Clear fields and refresh dropdown filtered to the new mode
+        ALL_FIELDS.forEach(f => { const el = document.getElementById(f); if (el) el.value = ''; });
+        document.getElementById('delete-profile-btn').disabled = true;
+        renderProfilesDropdown();
+    });
+});
+
+// ── Profiles ──────────────────────────────────────────────────────────────────
 (async function() {
     try {
         const resp = await fetch('/api/credentials');
@@ -130,18 +185,23 @@ const ALL_FIELDS = ['label','base_url','omadac_id','client_id','client_secret','
 })();
 
 function renderProfilesDropdown() {
+    const mode = getSelectedMode();
+    const filtered = savedProfiles
+        .map((p, idx) => ({ p, idx }))
+        .filter(({ p }) => (p.mode || 'msp') === mode);
+
     const wrapper = document.getElementById('profiles-wrapper');
     const select = document.getElementById('profiles-select');
-    if (savedProfiles.length === 0) { wrapper.classList.add('d-none'); return; }
+    if (filtered.length === 0) { wrapper.classList.add('d-none'); return; }
     wrapper.classList.remove('d-none');
     select.innerHTML = '<option value="-1">-- Choisir un controleur --</option>';
-    savedProfiles.forEach((p, idx) => {
+    filtered.forEach(({ p, idx }) => {
         const opt = document.createElement('option');
         opt.value = idx;
         opt.textContent = p.label || `Controleur ${idx + 1}`;
         select.appendChild(opt);
     });
-    if (savedProfiles.length === 1) { select.value = '0'; fillFromProfile(0); }
+    if (filtered.length === 1) { select.value = filtered[0].idx; fillFromProfile(filtered[0].idx); }
 }
 
 function fillFromProfile(idx) {
@@ -173,6 +233,7 @@ document.getElementById('delete-profile-btn').addEventListener('click', async fu
     document.getElementById('delete-profile-btn').disabled = true;
 });
 
+// ── Login submit ──────────────────────────────────────────────────────────────
 document.getElementById('login-form').addEventListener('submit', async function(e) {
     e.preventDefault();
     const btn = document.getElementById('login-btn');
@@ -180,7 +241,8 @@ document.getElementById('login-form').addEventListener('submit', async function(
     const errorDiv = document.getElementById('login-error');
     btn.disabled = true; spinner.classList.remove('d-none'); errorDiv.classList.add('d-none');
 
-    const data = { mode: 'msp' };
+    const mode = getSelectedMode();
+    const data = { mode };
     ALL_FIELDS.forEach(f => {
         const el = document.getElementById(f);
         if (el) data[f] = el.value;
@@ -193,7 +255,7 @@ document.getElementById('login-form').addEventListener('submit', async function(
             if (document.getElementById('save_credentials').checked) {
                 await fetch('/api/credentials', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data) });
             }
-            window.location.href = '/customers';
+            window.location.href = mode === 'standard' ? '/sites' : '/customers';
         } else {
             errorDiv.textContent = result.error || 'Erreur de connexion';
             errorDiv.classList.remove('d-none');

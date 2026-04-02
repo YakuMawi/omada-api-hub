@@ -36,12 +36,12 @@
                         <span>{{ success }}</span>
                     </div>
                     <div class="text-center mt-2">
-                        <a href="{{ url_for('app_login_page') }}" class="btn btn-primary btn-sm">
+                        <a href="{{ url_for('auth.app_login_page') }}" class="btn btn-primary btn-sm">
                             <i class="bi bi-box-arrow-in-right"></i> Se connecter
                         </a>
                     </div>
                     {% else %}
-                    <form method="post" action="{{ url_for('app_register_page') }}" autocomplete="on">
+                    <form method="post" action="{{ url_for('auth.app_register_page') }}" autocomplete="on">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
 
                         <div class="mb-3">
@@ -99,7 +99,7 @@
 
                     <hr class="my-3">
                     <div class="text-center">
-                        <a href="{{ url_for('app_login_page') }}" class="text-decoration-none small">
+                        <a href="{{ url_for('auth.app_login_page') }}" class="text-decoration-none small">
                             <i class="bi bi-arrow-left"></i> Retour à la connexion
                         </a>
                     </div>

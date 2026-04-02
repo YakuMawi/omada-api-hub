@@ -40,7 +40,7 @@
                     </div>
                     {% endif %}
 
-                    <form method="post" action="{{ url_for('app_login_page') }}" autocomplete="on">
+                    <form method="post" action="{{ url_for('auth.app_login_page') }}" autocomplete="on">
                         <input type="hidden" name="next" value="{{ next }}">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
 
@@ -73,10 +73,10 @@
 
                     <hr class="my-3">
                     <div class="text-center d-flex justify-content-between px-1">
-                        <a href="{{ url_for('app_register_page') }}" class="text-decoration-none small">
+                        <a href="{{ url_for('auth.app_register_page') }}" class="text-decoration-none small">
                             <i class="bi bi-person-plus"></i> Créer un compte
                         </a>
-                        <a href="{{ url_for('app_forgot_password') }}" class="text-decoration-none small text-muted">
+                        <a href="{{ url_for('auth.app_forgot_password') }}" class="text-decoration-none small text-muted">
                             <i class="bi bi-question-circle"></i> Mot de passe oublié ?
                         </a>
                     </div>
