@@ -318,11 +318,12 @@
                     <div class="d-flex justify-content-between align-items-start mb-3">
                         <div class="small text-muted">
                             <p class="mb-1 fw-bold">Format CSV attendu :</p>
-                            <code>site_id,device_key,mac,label</code><br>
-                            <span class="text-danger">site_id</span> et <span class="text-danger">device_key</span> sont obligatoires. <em>mac</em> et <em>label</em> sont optionnels.
+                            <code>Nom du Site;DeviceKey1;DeviceKey2;DeviceKey3</code><br>
+                            Séparateur <strong>;</strong> — première colonne = <span class="text-danger">nom du site</span>, colonnes suivantes = clés d'appareils (avec ou sans tirets). Plusieurs clés par ligne possible.
                         </div>
-                        <button class="btn btn-outline-secondary btn-sm" onclick="downloadCsvTemplate()">
-                            <i class="bi bi-download"></i> Template CSV
+                        <button class="btn btn-outline-secondary btn-sm" onclick="downloadCsvTemplate()" id="template-dl-btn">
+                            <span class="spinner-border spinner-border-sm d-none" id="template-dl-spinner"></span>
+                            <i class="bi bi-download"></i> Template CSV (avec vos sites)
                         </button>
                     </div>
 
@@ -353,10 +354,11 @@
                                 <thead class="table-light sticky-top">
                                     <tr>
                                         <th>#</th>
-                                        <th>Site ID</th>
+                                        <th>Site</th>
                                         <th>Device Key</th>
-                                        <th>MAC</th>
-                                        <th>Label</th>
+                                        <th>Name</th>
+                                        <th>Username</th>
+                                        <th>Password</th>
                                         <th>Statut</th>
                                     </tr>
                                 </thead>
@@ -1077,12 +1079,33 @@ function resetAdoptForm() {
         </button>`;
 }
 
-function downloadCsvTemplate() {
-    const csv = 'site_id,device_key,mac,label\nREMPLACER_PAR_SITE_ID,XXXX-XXXX-XXXX,AA:BB:CC:DD:EE:FF,Nom du device\n';
-    const a = document.createElement('a');
-    a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
-    a.download = 'template_adoption_devices.csv';
-    a.click();
+async function downloadCsvTemplate() {
+    const btn = document.getElementById('template-dl-btn');
+    const spinner = document.getElementById('template-dl-spinner');
+    btn.disabled = true;
+    spinner.classList.remove('d-none');
+    try {
+        const resp = await fetch('/api/sites');
+        const data = await resp.json();
+        const sites = ((data.result || {}).data) || [];
+        const header = 'Nom du Site;DeviceKey1;DeviceKey2;DeviceKey3';
+        let rows = [];
+        if (sites.length > 0) {
+            rows = sites.map(s => `${((s.siteName || s.name) || '').replace(/;/g, ',')};;;`);
+        } else {
+            rows = ['NomDuSite;;;'];
+        }
+        const csv = [header, ...rows].join('\r\n');
+        const a = document.createElement('a');
+        a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+        a.download = `template_adoption_devices_${new Date().toISOString().slice(0,10)}.csv`;
+        a.click();
+    } catch (err) {
+        alert('Erreur lors du chargement des sites : ' + err.message);
+    } finally {
+        btn.disabled = false;
+        spinner.classList.add('d-none');
+    }
 }
 
 function handleAdoptFileDrop(event) {
@@ -1104,74 +1127,166 @@ function handleAdoptFile(file) {
     }
 
     const reader = new FileReader();
-    reader.onload = function(e) {
+    reader.onload = async function(e) {
         const text = e.target.result;
-        parseCsvAndPreview(text);
+        await parseCsvAndPreview(text);
     };
     reader.readAsText(file, 'UTF-8');
 }
 
-function parseCsvAndPreview(text) {
+function parseCsvLine(line, sep) {
+    // Handles quoted fields
+    const result = [];
+    let cur = '', inQ = false;
+    for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (ch === '"') {
+            if (inQ && line[i+1] === '"') { cur += '"'; i++; }
+            else inQ = !inQ;
+        } else if (ch === sep && !inQ) {
+            result.push(cur.trim()); cur = '';
+        } else {
+            cur += ch;
+        }
+    }
+    result.push(cur.trim());
+    return result;
+}
+
+// Normalize a device key: ensure 4-4-4-4-4 dash format
+function normalizeDeviceKey(raw) {
+    const clean = raw.replace(/-/g, '').trim().toUpperCase();
+    if (/^[0-9A-F]{20}$/.test(clean)) {
+        return `${clean.slice(0,4)}-${clean.slice(4,8)}-${clean.slice(8,12)}-${clean.slice(12,16)}-${clean.slice(16,20)}`;
+    }
+    return raw.trim();
+}
+
+async function parseCsvAndPreview(text) {
     const errorDiv = document.getElementById('adopt-error');
-    const lines = text.split(/\r?\n/).filter(l => l.trim());
+    const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/).filter(l => l.trim());
 
     if (lines.length < 2) {
-        errorDiv.textContent = 'Le fichier CSV doit contenir au moins une ligne de donnees (+ header)';
+        errorDiv.textContent = 'Le fichier CSV doit contenir au moins une ligne de données (+ header)';
         errorDiv.classList.remove('d-none');
         return;
     }
 
-    // Parse header (case-insensitive)
-    const header = lines[0].split(',').map(h => h.trim().toLowerCase());
-    const idxSiteId   = header.findIndex(h => h === 'site_id');
-    const idxKey      = header.findIndex(h => h === 'device_key' || h === 'key');
-    const idxMac      = header.findIndex(h => h === 'mac');
-    const idxLabel    = header.findIndex(h => h === 'label' || h === 'nom' || h === 'name');
+    // Detect separator from first line
+    const firstLine = lines[0];
+    const sep = firstLine.includes(';') ? ';' : ',';
+    const headerCols = parseCsvLine(firstLine, sep).map(h => h.toLowerCase().trim());
 
-    if (idxSiteId === -1 || idxKey === -1) {
-        errorDiv.textContent = 'Colonnes obligatoires manquantes : site_id et device_key';
-        errorDiv.classList.remove('d-none');
-        return;
-    }
+    // Detect format: training format if first column is "nom du site" or no "site_id" column with semicolons
+    const isTrainingFormat = headerCols[0] === 'nom du site' ||
+        (sep === ';' && !headerCols.includes('site_id') && !headerCols.includes('device_key'));
+    console.log('[adopt] sep:', sep, '| headerCols:', headerCols, '| isTrainingFormat:', isTrainingFormat);
 
     adoptEntries = [];
     const tbody = document.getElementById('adopt-preview-tbody');
     tbody.innerHTML = '';
 
-    for (let i = 1; i < lines.length; i++) {
-        const cols = lines[i].split(',').map(c => c.trim());
-        const entry = {
-            site_id:   cols[idxSiteId]   || '',
-            key:       cols[idxKey]       || '',
-            mac:       idxMac  >= 0 ? (cols[idxMac]   || '') : '',
-            label:     idxLabel >= 0 ? (cols[idxLabel] || '') : '',
-        };
-        const valid = entry.site_id && entry.key;
-        adoptEntries.push(entry);
+    if (isTrainingFormat) {
+        // Fetch sites to resolve name → id
+        let siteMap = {}; // name.toLowerCase() → site object
+        try {
+            const resp = await fetch('/api/sites');
+            const data = await resp.json();
+            const sites = ((data.result || {}).data) || [];
+            sites.forEach(s => { siteMap[((s.siteName || s.name) || '').toLowerCase()] = s; });
+        } catch(e) {
+            errorDiv.textContent = 'Impossible de charger la liste des sites pour résoudre les noms.';
+            errorDiv.classList.remove('d-none');
+            return;
+        }
 
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-            <td class="text-muted">${i}</td>
-            <td><code class="small">${escapeHtml(entry.site_id)}</code></td>
-            <td><code class="small">${escapeHtml(entry.key)}</code></td>
-            <td><code class="small">${escapeHtml(entry.mac) || '<span class="text-muted">-</span>'}</code></td>
-            <td>${escapeHtml(entry.label) || '<span class="text-muted">-</span>'}</td>
-            <td>${valid
-                ? '<span class="badge bg-success">OK</span>'
-                : '<span class="badge bg-danger">Incomplet</span>'
-            }</td>
-        `;
-        tbody.appendChild(tr);
+        let rowNum = 0;
+        for (let i = 1; i < lines.length; i++) {
+            const cols = lines[i].split(sep).map(c => c.trim());
+            const siteName = cols[0];
+            if (!siteName) continue;
+
+            const site = siteMap[siteName.toLowerCase()];
+            const siteId = site ? (site.siteId || site.id) : null;
+            const keys = cols.slice(1).map(k => k.trim()).filter(k => k);
+
+            if (keys.length === 0) continue;
+
+            for (const rawKey of keys) {
+                rowNum++;
+                const key = normalizeDeviceKey(rawKey);
+                const valid = !!siteId && !!key;
+                adoptEntries.push({site_id: siteId || '', key, name: '', username: '', password: ''});
+
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td class="text-muted">${rowNum}</td>
+                    <td><span class="fw-semibold">${escapeHtml(siteName)}</span>${siteId
+                        ? `<br><code class="text-muted small">${escapeHtml(siteId)}</code>`
+                        : '<br><span class="badge bg-warning text-dark small">Site introuvable</span>'}</td>
+                    <td><code class="small">${escapeHtml(key)}</code></td>
+                    <td>-</td><td>-</td><td>-</td>
+                    <td>${valid
+                        ? '<span class="badge bg-success">OK</span>'
+                        : '<span class="badge bg-danger">Incomplet</span>'}</td>
+                `;
+                tbody.appendChild(tr);
+            }
+        }
+    } else {
+        // Legacy format: site_id,site_name,device_key,...
+        const idxSiteId   = headerCols.findIndex(h => h === 'site_id');
+        const idxSiteName = headerCols.findIndex(h => h === 'site_name');
+        const idxKey      = headerCols.findIndex(h => h === 'device_key' || h === 'key');
+        const idxName     = headerCols.findIndex(h => h === 'device_name' || h === 'name' || h === 'label' || h === 'nom');
+        const idxUser     = headerCols.findIndex(h => h === 'device_username' || h === 'username');
+        const idxPass     = headerCols.findIndex(h => h === 'device_password' || h === 'password');
+
+        if (idxSiteId === -1 || idxKey === -1) {
+            errorDiv.textContent = 'Format non reconnu. Utilisez le format : Nom du Site;Key1;Key2;Key3';
+            errorDiv.classList.remove('d-none');
+            return;
+        }
+
+        let rowNum = 0;
+        for (let i = 1; i < lines.length; i++) {
+            const cols = parseCsvLine(lines[i], sep);
+            const siteId   = cols[idxSiteId]   || '';
+            const siteName = idxSiteName >= 0 ? (cols[idxSiteName] || '') : '';
+            const key      = normalizeDeviceKey(cols[idxKey] || '');
+            const name     = idxName >= 0 ? (cols[idxName] || '') : '';
+            const username = idxUser >= 0 ? (cols[idxUser] || '') : '';
+            const password = idxPass >= 0 ? (cols[idxPass] || '') : '';
+
+            if (!key) continue;
+            rowNum++;
+            const valid = !!(siteId && key);
+            adoptEntries.push({site_id: siteId, key, name, username, password});
+
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td class="text-muted">${rowNum}</td>
+                <td><code class="small">${escapeHtml(siteId)}</code>${siteName ? `<br><span class="text-muted small">${escapeHtml(siteName)}</span>` : ''}</td>
+                <td><code class="small">${escapeHtml(key)}</code></td>
+                <td>${escapeHtml(name) || '<span class="text-muted">-</span>'}</td>
+                <td>${escapeHtml(username) || '<span class="text-muted">-</span>'}</td>
+                <td>${password ? '••••••' : '<span class="text-muted">-</span>'}</td>
+                <td>${valid
+                    ? '<span class="badge bg-success">OK</span>'
+                    : '<span class="badge bg-danger">Incomplet</span>'}</td>
+            `;
+            tbody.appendChild(tr);
+        }
     }
 
     const validCount = adoptEntries.filter(e => e.site_id && e.key).length;
     document.getElementById('adopt-preview-count').textContent =
-        `${adoptEntries.length} entree(s) detectee(s) — ${validCount} valide(s)`;
+        `${adoptEntries.length} entrée(s) détectée(s) — ${validCount} valide(s)`;
     document.getElementById('adopt-preview-wrapper').classList.remove('d-none');
     document.getElementById('adopt-run-btn').disabled = validCount === 0;
 
     if (validCount === 0) {
-        errorDiv.textContent = 'Aucune entree valide trouvee (site_id et device_key obligatoires)';
+        errorDiv.textContent = 'Aucune entrée valide trouvée. Vérifiez le format et les noms de sites.';
         errorDiv.classList.remove('d-none');
     }
 }
@@ -1210,7 +1325,7 @@ async function executeAdoption() {
             let ok = 0;
             results.forEach(r => {
                 if (r.success) ok++;
-                const lbl = r.label ? ` (${escapeHtml(r.label)})` : '';
+                const lbl = r.name ? ` <em>${escapeHtml(r.name)}</em>` : (r.label ? ` (${escapeHtml(r.label)})` : '');
                 log.innerHTML += `<div class="${r.success ? 'text-success' : 'text-danger'}">
                     ${r.success ? '&#10003;' : '&#10007;'}
                     <strong>${escapeHtml(r.key)}</strong>${lbl}
@@ -1341,20 +1456,16 @@ function downloadExportCsv() {
 
 function downloadImportCsv() {
     if (!exportDevices.length) return;
-    // Format compatible avec l'import "Adopter devices" : site_id,device_key,mac,label
-    // On inclut aussi serial et site_name en colonnes supplémentaires (lecture seule / référence)
-    const header = 'site_id,device_key,mac,label,serial,site_name';
-    const rows = exportDevices.map(d => {
-        const fields = [
-            d.site_id    || '',
-            d.adopt_key  || '',
-            d.mac        || '',
-            d.name       || '',
-            d.serial     || '',
-            d.site_name  || '',
-        ];
-        return fields.map(v => `"${v.toString().replace(/"/g, '""')}"`).join(',');
+    // Format compatible avec l'import "Adopter devices" : Nom du Site;Key1;Key2;...
+    // Group devices by site_name
+    const bySite = {};
+    exportDevices.forEach(d => {
+        const site = (d.site_name || 'SITE_INCONNU').replace(/;/g, ',');
+        if (!bySite[site]) bySite[site] = [];
+        if (d.adopt_key) bySite[site].push(d.adopt_key.replace(/-/g, ''));
     });
+    const header = 'Nom du Site;DeviceKey1;DeviceKey2;DeviceKey3';
+    const rows = Object.entries(bySite).map(([site, keys]) => `${site};${keys.join(';')}`);
     const csv = [header, ...rows].join('\r\n');
     const a = document.createElement('a');
     a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);

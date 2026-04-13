@@ -1124,6 +1124,45 @@ def api_forget_device(site_id, device_mac):
         return jsonify(resp.json()), resp.status_code
 
 
+def _device_type_order(device):
+    """Return forget priority: 0=AP (first), 1=Switch, 2=Gateway (last)."""
+    t = str(device.get("type", "")).lower()
+    if t in ("2", "ap", "eap"):
+        return 0
+    if t in ("1", "switch", "osw"):
+        return 1
+    if t in ("0", "gateway", "osg"):
+        return 2
+    return 1  # unknown alongside switches
+
+
+def _forget_ordered(devices_data, forget_fn):
+    """Forget devices in order: APs → 30s → Switches → 30s → Gateway.
+    forget_fn(device) must return (status_code, response_dict).
+    Returns list of result dicts."""
+    aps      = [d for d in devices_data if _device_type_order(d) == 0]
+    switches = [d for d in devices_data if _device_type_order(d) == 1]
+    gateways = [d for d in devices_data if _device_type_order(d) == 2]
+
+    results = []
+    for group_idx, group in enumerate([aps, switches, gateways]):
+        for device in group:
+            mac = device.get("mac", "")
+            if not mac:
+                continue
+            status, rjson = forget_fn(device)
+            results.append({
+                "mac": mac, "name": device.get("name", mac),
+                "status": status, "response": rjson,
+            })
+        # Wait 30s between groups if next group is non-empty
+        if group_idx == 0 and (switches or gateways):
+            time.sleep(30)
+        elif group_idx == 1 and gateways:
+            time.sleep(30)
+    return results
+
+
 @app.route("/api/sites/<site_id>/forget-devices", methods=["POST"])
 @require_auth
 def api_forget_site_devices(site_id):
@@ -1143,20 +1182,15 @@ def api_forget_site_devices(site_id):
         except Exception:
             pass
 
-        forget_results = []
-        for device in devices_data:
+        def _forget_direct(device):
             mac = device.get("mac", "")
-            if not mac:
-                continue
-            forget_resp = omada_post(std(f"/sites/{site_id}/devices/{mac}/forget"))
+            r = omada_post(std(f"/sites/{site_id}/devices/{mac}/forget"))
             try:
-                forget_json = forget_resp.json()
+                return r.status_code, r.json()
             except Exception:
-                forget_json = {}
-            forget_results.append({
-                "mac": mac, "name": device.get("name", mac),
-                "status": forget_resp.status_code, "response": forget_json,
-            })
+                return r.status_code, {}
+
+        forget_results = _forget_ordered(devices_data, _forget_direct)
     else:
         cid = customer_id if customer_id else oid
 
@@ -1169,33 +1203,29 @@ def api_forget_site_devices(site_id):
         except Exception:
             pass
 
-        forget_results = []
-        for device in devices_data:
+        def _forget_msp(device):
             mac = device.get("mac", "")
-            if not mac:
-                continue
             if customer_id:
-                forget_resp = omada_post(msp(f"/customers/{customer_id}/sites/{site_id}/devices/{mac}/forget"))
+                r = omada_post(msp(f"/customers/{customer_id}/sites/{site_id}/devices/{mac}/forget"))
                 try:
-                    forget_json = forget_resp.json()
+                    rj = r.json()
                 except Exception:
-                    forget_json = {}
-                if forget_json.get("errorCode", -1) != 0:
-                    forget_resp = omada_post(f"/openapi/v1/{cid}/sites/{site_id}/devices/{mac}/forget")
+                    rj = {}
+                if rj.get("errorCode", -1) != 0:
+                    r = omada_post(f"/openapi/v1/{cid}/sites/{site_id}/devices/{mac}/forget")
                     try:
-                        forget_json = forget_resp.json()
+                        rj = r.json()
                     except Exception:
-                        forget_json = {}
+                        rj = {}
             else:
-                forget_resp = omada_post(f"/openapi/v1/{oid}/sites/{site_id}/devices/{mac}/forget")
+                r = omada_post(f"/openapi/v1/{oid}/sites/{site_id}/devices/{mac}/forget")
                 try:
-                    forget_json = forget_resp.json()
+                    rj = r.json()
                 except Exception:
-                    forget_json = {}
-            forget_results.append({
-                "mac": mac, "name": device.get("name", mac),
-                "status": forget_resp.status_code, "response": forget_json,
-            })
+                    rj = {}
+            return r.status_code, rj
+
+        forget_results = _forget_ordered(devices_data, _forget_msp)
 
     ok_count = sum(1 for r in forget_results if r.get("response", {}).get("errorCode", -1) == 0)
     return jsonify({
@@ -1226,23 +1256,15 @@ def api_delete_site_with_forget(site_id):
         except Exception:
             pass
 
-        forget_results = []
-        for device in devices_data:
+        def _forget_direct_d(device):
             mac = device.get("mac", "")
-            if not mac:
-                continue
-            forget_resp = omada_post(std(f"/sites/{site_id}/devices/{mac}/forget"))
+            r = omada_post(std(f"/sites/{site_id}/devices/{mac}/forget"))
             try:
-                forget_json = forget_resp.json()
+                return r.status_code, r.json()
             except Exception:
-                forget_json = {}
-            forget_results.append({
-                "mac": mac, "name": device.get("name", mac),
-                "status": forget_resp.status_code, "response": forget_json,
-            })
+                return r.status_code, {}
 
-        if devices_data:
-            time.sleep(5)
+        forget_results = _forget_ordered(devices_data, _forget_direct_d)
 
         delete_resp = omada_delete(std(f"/sites/{site_id}"))
         try:
@@ -1264,36 +1286,29 @@ def api_delete_site_with_forget(site_id):
         except Exception:
             pass
 
-        forget_results = []
-        for device in devices_data:
+        def _forget_msp_d(device):
             mac = device.get("mac", "")
-            if not mac:
-                continue
             if customer_id:
-                forget_resp = omada_post(msp(f"/customers/{customer_id}/sites/{site_id}/devices/{mac}/forget"))
+                r = omada_post(msp(f"/customers/{customer_id}/sites/{site_id}/devices/{mac}/forget"))
                 try:
-                    forget_json = forget_resp.json()
+                    rj = r.json()
                 except Exception:
-                    forget_json = {}
-                if forget_json.get("errorCode", -1) != 0:
-                    forget_resp = omada_post(f"/openapi/v1/{cid}/sites/{site_id}/devices/{mac}/forget")
+                    rj = {}
+                if rj.get("errorCode", -1) != 0:
+                    r = omada_post(f"/openapi/v1/{cid}/sites/{site_id}/devices/{mac}/forget")
                     try:
-                        forget_json = forget_resp.json()
+                        rj = r.json()
                     except Exception:
-                        forget_json = {}
+                        rj = {}
             else:
-                forget_resp = omada_post(f"/openapi/v1/{oid}/sites/{site_id}/devices/{mac}/forget")
+                r = omada_post(f"/openapi/v1/{oid}/sites/{site_id}/devices/{mac}/forget")
                 try:
-                    forget_json = forget_resp.json()
+                    rj = r.json()
                 except Exception:
-                    forget_json = {}
-            forget_results.append({
-                "mac": mac, "name": device.get("name", mac),
-                "status": forget_resp.status_code, "response": forget_json,
-            })
+                    rj = {}
+            return r.status_code, rj
 
-        if devices_data:
-            time.sleep(5)
+        forget_results = _forget_ordered(devices_data, _forget_msp_d)
 
         # Delete: try MSP, fallback std with customerId
         delete_resp = omada_delete(msp(f"/sites/{site_id}"))
@@ -1880,37 +1895,50 @@ def api_bulk_create_sites():
 @require_direct_site_mode
 def api_adopt_device(site_id):
     """Adopt a single device into a site via device key.
-    Body: {"key": "XXXX-XXXX-XXXX", "mac": "AA:BB:CC:DD:EE:FF"}  (mac optional)
+    Body: {"key": "XXXX-XXXX-XXXX", "mac": "...", "name": "...", "username": "...", "password": "..."}
+    mac/name/username/password are optional.
     Tries multiple Omada API paths since it varies by firmware version.
     """
     refresh_token_if_needed()
     body = request.get_json(silent=True) or {}
     device_key = body.get("key", "").strip()
     mac = body.get("mac", "").strip()
+    name = body.get("name", "").strip()
+    username = body.get("username", "").strip()
+    password = body.get("password", "").strip()
 
     if not device_key:
         return jsonify({"error": "Le champ 'key' (device key) est obligatoire"}), 400
 
-    adopt_body = {"key": device_key}
-    if mac:
-        adopt_body["mac"] = mac
+    # Omada 6.x: multi-devices/devicekey-add (accepts device key/QR code)
+    new_device = {"deviceKey": device_key}
+    if name:      new_device["name"] = name
+    if username:  new_device["username"] = username
+    if password:  new_device["password"] = password
 
-    # Try several known Omada API adoption endpoints (differs by version)
-    candidate_paths = [
-        std(f"/sites/{site_id}/cmd/adopt"),
-        std(f"/sites/{site_id}/devices"),
-        std(f"/sites/{site_id}/devices/adopt"),
-    ]
+    try:
+        resp = omada_post(std(f"/sites/{site_id}/multi-devices/devicekey-add"), {"devices": [new_device]})
+        rdata = resp.json()
+        if rdata.get("errorCode", -1) == 0:
+            return jsonify(rdata), 200
+    except Exception:
+        pass
+
+    # Fallback: older Omada versions (5.x and below)
+    old_body = {"key": device_key}
+    if mac:       old_body["mac"] = mac
+    if name:      old_body["name"] = name
+    if username:  old_body["username"] = username
+    if password:  old_body["password"] = password
 
     last_resp = None
-    for path in candidate_paths:
+    for path in [std(f"/sites/{site_id}/cmd/adopt"), std(f"/sites/{site_id}/devices/adopt")]:
         try:
-            resp = omada_post(path, adopt_body)
+            resp = omada_post(path, old_body)
             last_resp = resp
             rdata = resp.json()
             if rdata.get("errorCode", -1) == 0:
                 return jsonify(rdata), 200
-            # errorCode -1301 = device already adopted elsewhere, still return it
         except Exception:
             continue
 
@@ -1927,7 +1955,8 @@ def api_adopt_device(site_id):
 @require_direct_site_mode
 def api_bulk_adopt_devices():
     """Adopt multiple devices across multiple sites from a list.
-    Body: {"entries": [{"site_id": "...", "key": "...", "mac": "...", "label": "..."}, ...]}
+    Body: {"entries": [{"site_id": "...", "key": "...", "mac": "...", "name": "...",
+                        "username": "...", "password": "...", "label": "..."}, ...]}
     """
     refresh_token_if_needed()
     body = request.get_json(silent=True) or {}
@@ -1943,6 +1972,9 @@ def api_bulk_adopt_devices():
         site_id = entry.get("site_id", "").strip()
         device_key = entry.get("key", "").strip()
         mac = entry.get("mac", "").strip()
+        name = entry.get("name", "").strip()
+        username = entry.get("username", "").strip()
+        password = entry.get("password", "").strip()
         label = entry.get("label", "").strip()
 
         if not site_id or not device_key:
@@ -1952,41 +1984,63 @@ def api_bulk_adopt_devices():
             })
             continue
 
-        adopt_body = {"key": device_key}
-        if mac:
-            adopt_body["mac"] = mac
-
-        candidate_paths = [
-            f"/openapi/v1/{omada_id()}/sites/{site_id}/cmd/adopt",
-            f"/openapi/v1/{omada_id()}/sites/{site_id}/devices",
-            f"/openapi/v1/{omada_id()}/sites/{site_id}/devices/adopt",
-        ]
-
         success = False
         msg = ""
-        for path in candidate_paths:
+
+        # Omada 6.x: multi-devices/devicekey-add
+        new_device = {"deviceKey": device_key}
+        if name:      new_device["name"] = name
+        if username:  new_device["username"] = username
+        if password:  new_device["password"] = password
+
+        try:
+            full_url = f"{omada_base()}/openapi/v1/{omada_id()}/sites/{site_id}/multi-devices/devicekey-add"
+            resp = http_requests.post(full_url, json={"devices": [new_device]},
+                                      headers=omada_headers(), timeout=20, verify=False)
             try:
-                resp = http_requests.post(
-                    f"{omada_base()}{path}",
-                    json=adopt_body,
-                    headers=omada_headers(),
-                    timeout=20,
-                    verify=False,
-                )
                 rdata = resp.json()
-                if rdata.get("errorCode", -1) == 0:
+                ec = rdata.get("errorCode")
+                if ec == 0:
                     success = True
                     msg = "Adopte"
-                    break
                 else:
-                    msg = rdata.get("msg", f"Erreur code {rdata.get('errorCode')}")
-            except Exception as e:
-                msg = str(e)
+                    msg = rdata.get("msg") or f"Erreur code {ec} (HTTP {resp.status_code})"
+            except Exception:
+                msg = f"HTTP {resp.status_code} — réponse non-JSON"
+        except Exception as e:
+            msg = str(e)
+
+        # Fallback: older Omada versions (5.x) — ne pas écraser un message Omada utile
+        if not success:
+            old_body = {"key": device_key}
+            if mac:       old_body["mac"] = mac
+            if name:      old_body["name"] = name
+            if username:  old_body["username"] = username
+            if password:  old_body["password"] = password
+            for suffix in ["/cmd/adopt", "/devices/adopt"]:
+                full_url = f"{omada_base()}/openapi/v1/{omada_id()}/sites/{site_id}{suffix}"
+                try:
+                    resp = http_requests.post(full_url, json=old_body,
+                                              headers=omada_headers(), timeout=20, verify=False)
+                    try:
+                        rdata = resp.json()
+                        ec = rdata.get("errorCode")
+                        if ec == 0:
+                            success = True
+                            msg = "Adopte"
+                            break
+                        elif rdata.get("msg"):
+                            msg = rdata["msg"]  # Only override if old API gives a real message
+                    except Exception:
+                        pass  # Keep the message from the new endpoint
+                except Exception:
+                    pass
 
         results.append({
             "site_id": site_id,
             "key": device_key,
             "mac": mac,
+            "name": name,
             "label": label,
             "success": success,
             "msg": msg,

@@ -71,7 +71,7 @@ Ouvrez ensuite **https://\<votre-ip\>** dans votre navigateur (port 443 HTTPS), 
 - **Création en masse** — préfixe, nombre, incrémentation, mêmes paramètres pour tous les sites
 - **Suppression en masse** — sélection multiple, confirmation sécurisée, progression en temps réel
 - **Forget devices en masse** — oublier les équipements de plusieurs sites sélectionnés sans supprimer les sites
-- **Adoption de devices** — importer des équipements par adresse MAC
+- **Adoption de devices par fichier CSV** — import par device key (QR code), résolution automatique du nom de site, compatible Omada 6.x
 - **Export des devices** — exporter la liste des équipements de tous les sites (CSV)
 
 ### Détail de site
@@ -257,7 +257,7 @@ omada-api-hub/
 |---------|-----------|
 | **Clients MSP** | Lister, créer, supprimer (unitaire et en masse) |
 | **Sites** | Lister, créer, supprimer, détail, forget devices, export |
-| **Devices** | Lister, forget, adopt |
+| **Devices** | Lister, forget (ordonné AP→Switch→Gateway), adopt par CSV (device key) |
 | **Clients réseau** | Lister par site |
 | **WAN** | Statut ports, configuration |
 | **WireGuard VPN** | Lister, modifier, supprimer |
@@ -266,6 +266,16 @@ omada-api-hub/
 ---
 
 ## Changelog
+
+### v1.2.0 (2026-04-13)
+
+**Corrections et améliorations :**
+- Adoption par CSV : correction de la résolution du nom de site (`siteId` vs `id` selon la réponse API)
+- Adoption par CSV : suppression du bloc debug affiché en rouge dans la modal
+- Adoption Omada 6.x : support du nouvel endpoint `multi-devices/devicekey-add` (device key / QR code), fallback automatique vers les endpoints 5.x
+- Adoption : messages d'erreur Omada précis au lieu de `Erreur code None`
+- Forget devices : ordre garanti AP → attente 30 s → Switch → attente 30 s → Gateway (évite l'échec du forget sur les équipements dépendants)
+- Service systemd `omada-api-hub` : démarrage automatique au boot
 
 ### v1.1.0 (2026-04-02)
 

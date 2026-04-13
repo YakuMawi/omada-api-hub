@@ -119,6 +119,9 @@
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h5 class="mb-0">Liste des equipements</h5>
         <div>
+            <button class="btn btn-success btn-sm me-1" onclick="showAddDeviceModal()">
+                <i class="bi bi-plus-circle"></i> Ajouter device
+            </button>
             <button class="btn btn-warning btn-sm me-1" id="forget-all-btn" onclick="forgetAllDevices()" disabled>
                 <i class="bi bi-eraser"></i> Forget All
             </button>
@@ -233,6 +236,98 @@
                 <button type="button" class="btn btn-primary" id="ssid-save-btn" onclick="saveSsidEdit()">
                     <span class="spinner-border spinner-border-sm d-none" id="ssid-save-spinner"></span>
                     <i class="bi bi-check-lg"></i> Enregistrer
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal : ajouter un device (adoption) -->
+<div class="modal fade" id="addDeviceModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title"><i class="bi bi-plus-circle"></i> Ajouter un device</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <!-- Tabs manuel / CSV -->
+                <ul class="nav nav-tabs mb-3" id="addDeviceTabs">
+                    <li class="nav-item">
+                        <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#add-manual-tab" type="button">
+                            <i class="bi bi-keyboard"></i> Saisie manuelle
+                        </button>
+                    </li>
+                    <li class="nav-item">
+                        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#add-csv-tab" type="button">
+                            <i class="bi bi-file-earmark-spreadsheet"></i> Import CSV
+                        </button>
+                    </li>
+                </ul>
+                <div class="tab-content">
+                    <!-- Saisie manuelle -->
+                    <div class="tab-pane fade show active" id="add-manual-tab">
+                        <div class="row g-3">
+                            <div class="col-12">
+                                <label class="form-label fw-bold">Device Key <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control font-monospace" id="add-device-key"
+                                       placeholder="Ex : 1111-1111-1111-1111-1111">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Device Name <span class="text-muted small">(optionnel)</span></label>
+                                <input type="text" class="form-control" id="add-device-name" placeholder="Nom du device">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Username <span class="text-muted small">(optionnel)</span></label>
+                                <input type="text" class="form-control" id="add-device-username" placeholder="admin">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Password <span class="text-muted small">(optionnel)</span></label>
+                                <input type="password" class="form-control" id="add-device-password" placeholder="••••••••">
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Import CSV -->
+                    <div class="tab-pane fade" id="add-csv-tab">
+                        <div class="alert alert-info py-2 mb-3">
+                            <i class="bi bi-info-circle"></i> Format attendu (colonnes) :
+                            <strong>Device Key</strong>, Device Name, Device Username, Device Password
+                            <br><small class="text-muted">La première ligne (en-tête) est ignorée automatiquement. Séparateur : virgule ou point-virgule.</small>
+                        </div>
+                        <div class="mb-3">
+                            <button class="btn btn-outline-secondary btn-sm" onclick="downloadDeviceTemplate()">
+                                <i class="bi bi-download"></i> Télécharger le template CSV
+                            </button>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Fichier CSV</label>
+                            <input type="file" class="form-control" id="add-device-csv" accept=".csv,.txt">
+                        </div>
+                        <div id="csv-preview" class="d-none">
+                            <div class="fw-bold mb-1 small"><i class="bi bi-eye"></i> Aperçu (<span id="csv-preview-count">0</span> device(s)) :</div>
+                            <div class="table-responsive" style="max-height:200px;overflow-y:auto">
+                                <table class="table table-sm table-bordered mb-0">
+                                    <thead class="table-light">
+                                        <tr><th>Device Key</th><th>Name</th><th>Username</th><th>Password</th></tr>
+                                    </thead>
+                                    <tbody id="csv-preview-tbody"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div id="add-device-error" class="alert alert-danger d-none mt-3"></div>
+                <!-- Résultats -->
+                <div id="add-device-results" class="d-none mt-3">
+                    <div class="fw-bold mb-2"><i class="bi bi-list-check"></i> Résultats :</div>
+                    <div id="add-device-results-body"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fermer</button>
+                <button type="button" class="btn btn-success" id="add-device-btn" onclick="submitAddDevices()">
+                    <span class="spinner-border spinner-border-sm d-none" id="add-device-spinner"></span>
+                    <i class="bi bi-plus-circle"></i> Adopter
                 </button>
             </div>
         </div>
@@ -1236,5 +1331,129 @@ document.querySelectorAll('#site-tabs button[data-bs-toggle="tab"]').forEach(tab
 // ==================== Init ====================
 loadSiteInfo();
 loadDevices();
+
+// ==================== Add Device (adoption) ====================
+let csvDeviceRows = [];
+
+function showAddDeviceModal() {
+    document.getElementById('add-device-key').value = '';
+    document.getElementById('add-device-name').value = '';
+    document.getElementById('add-device-username').value = '';
+    document.getElementById('add-device-password').value = '';
+    document.getElementById('add-device-csv').value = '';
+    document.getElementById('add-device-error').classList.add('d-none');
+    document.getElementById('add-device-results').classList.add('d-none');
+    document.getElementById('csv-preview').classList.add('d-none');
+    csvDeviceRows = [];
+    // Reset to manual tab
+    const manualTab = document.querySelector('#addDeviceTabs button[data-bs-target="#add-manual-tab"]');
+    bootstrap.Tab.getOrCreateInstance(manualTab).show();
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('addDeviceModal')).show();
+}
+
+function downloadDeviceTemplate() {
+    const header = 'Device Key,Device Name (Optional),Device Username (Optional),Device Password (Optional)';
+    const example = '1111-1111-1111-1111-1111,,,';
+    const blob = new Blob([header + '\n' + example + '\n'], {type: 'text/csv'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'device_import_template.csv';
+    a.click();
+}
+
+document.getElementById('add-device-csv').addEventListener('change', function() {
+    const file = this.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const text = e.target.result;
+        const lines = text.split(/\r?\n/).filter(l => l.trim());
+        csvDeviceRows = [];
+        const tbody = document.getElementById('csv-preview-tbody');
+        tbody.innerHTML = '';
+        // Skip header row (first line)
+        for (let i = 1; i < lines.length; i++) {
+            const sep = lines[i].includes(';') ? ';' : ',';
+            const cols = lines[i].split(sep).map(c => c.trim().replace(/^"|"$/g, ''));
+            const key = cols[0] || '';
+            if (!key) continue;
+            const name = cols[1] || '';
+            const username = cols[2] || '';
+            const password = cols[3] || '';
+            csvDeviceRows.push({key, name, username, password});
+            const tr = document.createElement('tr');
+            tr.innerHTML = `<td><code>${escapeHtml(key)}</code></td><td>${escapeHtml(name)}</td><td>${escapeHtml(username)}</td><td>${password ? '••••••' : ''}</td>`;
+            tbody.appendChild(tr);
+        }
+        document.getElementById('csv-preview-count').textContent = csvDeviceRows.length;
+        document.getElementById('csv-preview').classList.toggle('d-none', csvDeviceRows.length === 0);
+    };
+    reader.readAsText(file);
+});
+
+async function submitAddDevices() {
+    const errorDiv = document.getElementById('add-device-error');
+    const resultsDiv = document.getElementById('add-device-results');
+    const btn = document.getElementById('add-device-btn');
+    const spinner = document.getElementById('add-device-spinner');
+    errorDiv.classList.add('d-none');
+    resultsDiv.classList.add('d-none');
+
+    // Determine active tab
+    const activeTab = document.querySelector('#addDeviceTabs .nav-link.active').getAttribute('data-bs-target');
+    let devices = [];
+
+    if (activeTab === '#add-manual-tab') {
+        const key = document.getElementById('add-device-key').value.trim();
+        if (!key) { errorDiv.textContent = 'La Device Key est obligatoire.'; errorDiv.classList.remove('d-none'); return; }
+        devices.push({
+            key,
+            name: document.getElementById('add-device-name').value.trim(),
+            username: document.getElementById('add-device-username').value.trim(),
+            password: document.getElementById('add-device-password').value.trim(),
+        });
+    } else {
+        if (!csvDeviceRows.length) { errorDiv.textContent = 'Aucun device valide dans le fichier CSV.'; errorDiv.classList.remove('d-none'); return; }
+        devices = csvDeviceRows;
+    }
+
+    btn.disabled = true;
+    spinner.classList.remove('d-none');
+    try {
+        const results = [];
+        for (const d of devices) {
+            const resp = await fetch(`/api/sites/${SITE_ID}/devices/adopt`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({key: d.key, name: d.name, username: d.username, password: d.password}),
+            });
+            const data = await resp.json();
+            results.push({key: d.key, name: d.name, success: data.errorCode === 0, msg: data.msg || data.error || ''});
+        }
+        // Display results
+        const ok = results.filter(r => r.success).length;
+        let html = `<div class="alert ${ok === results.length ? 'alert-success' : ok > 0 ? 'alert-warning' : 'alert-danger'} py-2 mb-2">
+            ${ok}/${results.length} device(s) adopté(s) avec succès.
+        </div><ul class="list-group list-group-flush">`;
+        for (const r of results) {
+            html += `<li class="list-group-item py-1 d-flex align-items-center gap-2">
+                <i class="bi ${r.success ? 'bi-check-circle text-success' : 'bi-x-circle text-danger'}"></i>
+                <code>${escapeHtml(r.key)}</code>
+                ${r.name ? `<span class="text-muted small">${escapeHtml(r.name)}</span>` : ''}
+                ${r.msg && !r.success ? `<span class="text-danger small ms-auto">${escapeHtml(r.msg)}</span>` : ''}
+            </li>`;
+        }
+        html += '</ul>';
+        document.getElementById('add-device-results-body').innerHTML = html;
+        resultsDiv.classList.remove('d-none');
+        if (ok > 0) setTimeout(loadDevices, 3000);
+    } catch (err) {
+        errorDiv.textContent = err.message;
+        errorDiv.classList.remove('d-none');
+    } finally {
+        btn.disabled = false;
+        spinner.classList.add('d-none');
+    }
+}
 </script>
 {% endblock %}
