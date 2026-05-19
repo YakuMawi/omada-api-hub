@@ -16,7 +16,24 @@ if [ ! -f .env ]; then
     echo "→ Configuration créée (.env)"
 fi
 
-# ── 3. Démarrage ─────────────────────────────────────────────────────────────
+# ── 3. Certificat HTTPS auto-signé (généré au premier lancement) ─────────────
+if [ ! -f ssl/cert.pem ] || [ ! -f ssl/key.pem ]; then
+    if ! command -v openssl >/dev/null 2>&1; then
+        echo "✗ 'openssl' est requis pour générer le certificat HTTPS."
+        echo "  Installe-le : sudo apt install -y openssl"
+        exit 1
+    fi
+    echo "→ Génération du certificat auto-signé (valide 10 ans)…"
+    mkdir -p ssl
+    openssl req -x509 -newkey rsa:4096 -sha256 -days 3650 -nodes \
+        -keyout ssl/key.pem -out ssl/cert.pem \
+        -subj "/CN=omada-api-hub" \
+        -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
+        >/dev/null 2>&1
+    chmod 600 ssl/key.pem
+fi
+
+# ── 4. Démarrage ─────────────────────────────────────────────────────────────
 IP=$(hostname -I 2>/dev/null | awk '{print $1}')
-echo "→ Omada API Hub — http://${IP:-localhost}:5000"
+echo "→ Omada API Hub — https://${IP:-localhost}"
 exec python3 app.py

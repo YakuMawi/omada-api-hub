@@ -18,6 +18,23 @@ python3 -c "import flask, bcrypt, requests, dotenv" 2>/dev/null \
     || pip3 install --user -r "$DIR/requirements.txt" -q 2>/dev/null \
     || pip3 install --user --break-system-packages -r "$DIR/requirements.txt" -q
 
+# Génération du certificat HTTPS auto-signé si absent
+if [ ! -f "$DIR/ssl/cert.pem" ] || [ ! -f "$DIR/ssl/key.pem" ]; then
+    if ! command -v openssl >/dev/null 2>&1; then
+        echo "✗ 'openssl' est requis pour générer le certificat HTTPS."
+        echo "  Installe-le : sudo apt install -y openssl"
+        exit 1
+    fi
+    echo "→ Génération du certificat auto-signé (valide 10 ans)…"
+    mkdir -p "$DIR/ssl"
+    openssl req -x509 -newkey rsa:4096 -sha256 -days 3650 -nodes \
+        -keyout "$DIR/ssl/key.pem" -out "$DIR/ssl/cert.pem" \
+        -subj "/CN=omada-api-hub" \
+        -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
+        >/dev/null 2>&1
+    chmod 600 "$DIR/ssl/key.pem"
+fi
+
 # Autoriser python3 à écouter sur le port 443 (cibler le binaire réel, pas le symlink)
 PYTHON_BIN=$(readlink -f "$(which python3)")
 sudo setcap 'cap_net_bind_service=+ep' "$PYTHON_BIN"

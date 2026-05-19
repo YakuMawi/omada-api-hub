@@ -30,7 +30,7 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq \
     python3 python3-pip python3-venv \
-    git sudo libcap2-bin ca-certificates curl
+    git sudo libcap2-bin ca-certificates curl openssl
 
 # ── 1. Utilisateur dédié ─────────────────────────────────────────────────────
 if ! id "$APP_USER" >/dev/null 2>&1; then
