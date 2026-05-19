@@ -43,6 +43,56 @@ Ouvrez ensuite **https://\<votre-ip\>** dans votre navigateur (port 443 HTTPS), 
 
 > Le certificat est auto-signé : acceptez l'avertissement du navigateur au premier accès.
 
+### Installation sur LXC (Proxmox / LXD)
+
+Un script tout-en-un est fourni pour les conteneurs LXC vierges. Il crée un utilisateur dédié `omada`, installe les dépendances, clone le dépôt et configure le service systemd.
+
+#### Prérequis côté hôte (Proxmox/LXD)
+
+- Conteneur Ubuntu 22.04+ ou Debian 12
+- 512 Mo de RAM minimum (1 Go recommandé), 2 Go de disque
+- Port 443 atteignable depuis votre réseau
+
+> **LXC non-privilégié** : fonctionne dans la majorité des cas. Si `setcap` échoue à cause d'AppArmor, ajouter sur l'hôte Proxmox dans `/etc/pve/lxc/<id>.conf` :
+> ```
+> lxc.apparmor.profile: unconfined
+> ```
+> puis redémarrer le conteneur.
+
+#### Installation en une commande
+
+Dans le conteneur LXC, en root :
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/YakuMawi/omada-api-hub/main/install-lxc.sh | bash
+```
+
+Ou en deux étapes (recommandé pour inspecter le script avant exécution) :
+
+```bash
+curl -fsSL -O https://raw.githubusercontent.com/YakuMawi/omada-api-hub/main/install-lxc.sh
+bash install-lxc.sh
+```
+
+Le script :
+
+1. Met à jour les paquets et installe `python3`, `pip3`, `git`, `libcap2-bin`, `sudo`, `curl`
+2. Crée l'utilisateur dédié `omada` avec un sudo NOPASSWD **strictement limité** aux commandes nécessaires au service (`setcap`, `systemctl` sur `omada-api-hub`, lecture des logs) — pas un sudo root global
+3. Clone le dépôt dans `/home/omada/omada-api-hub`
+4. Exécute `install-service.sh` (deps Python, `setcap` port 443, service systemd activé au boot)
+5. Affiche l'URL d'accès en fin d'installation
+
+#### Gestion post-installation
+
+```bash
+# Statut et logs
+systemctl status omada-api-hub
+journalctl -u omada-api-hub -f
+
+# Mise à jour
+sudo -u omada bash -c 'cd /home/omada/omada-api-hub && git pull && sudo systemctl restart omada-api-hub'
+```
+
 ---
 
 ## Fonctionnalités
